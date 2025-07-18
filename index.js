@@ -1,3 +1,4 @@
+// نفس المستوردات السابقة تماماً
 const express = require("express");
 const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
@@ -6,9 +7,7 @@ require("dotenv").config();
 
 const requiredEnv = ["TELEGRAM_BOT_TOKEN", "OKX_API_KEY", "OKX_API_SECRET_KEY", "OKX_API_PASSPHRASE", "AUTHORIZED_USER_ID"];
 for (const envVar of requiredEnv) {
-    if (!process.env[envVar]) {
-        console.error(`!!! متغير البيئة ${envVar} غير موجود.`);
-    }
+    if (!process.env[envVar]) console.error(`!!! متغير البيئة ${envVar} غير موجود.`);
 }
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
@@ -27,9 +26,7 @@ function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
     const bodyString = typeof body === "object" ? JSON.stringify(body) : body;
     const signString = timestamp + method.toUpperCase() + path + bodyString;
-    const signature = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY)
-        .update(signString)
-        .digest("base64");
+    const signature = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(signString).digest("base64");
     return {
         "Content-Type": "application/json",
         "OK-ACCESS-KEY": process.env.OKX_API_KEY,
@@ -94,10 +91,9 @@ async function getPortfolioData() {
     }
 }
 
-async function showBalance(ctx) {
-    await ctx.reply("🔄 جارٍ تحديث المحفظة...");
+async function generatePortfolioMessage() {
     const { assets, totalUsd } = await getPortfolioData();
-    if (!assets) return ctx.reply("❌ تعذر جلب بيانات المحفظة حالياً.");
+    if (!assets) return "❌ تعذر جلب بيانات المحفظة حالياً.";
 
     let msg = `*📊 ملخص المحفظة 📊*\n\n`;
     msg += `💰 *القيمة الحالية:* $${totalUsd.toFixed(2)}\n`;
@@ -112,7 +108,7 @@ async function showBalance(ctx) {
 
     msg += `_آخر تحديث: ${new Date().toLocaleString("ar-EG")}_`;
 
-    ctx.reply(msg, { parse_mode: "Markdown" });
+    return msg;
 }
 
 function checkTrades(currentAssets, previousAssets) {
@@ -143,7 +139,7 @@ function checkTrades(currentAssets, previousAssets) {
 async function startMonitoring(ctx) {
     if (isMonitoring) return ctx.reply("⚠️ المراقبة مفعلة بالفعل.");
     isMonitoring = true;
-    ctx.reply("✅ تم تشغيل مراقبة صفقاتك تلقائياً.");
+    ctx.reply("✅ تم تشغيل مراقبة صفقاتك تلقائياً.\nسيتم إعلامك عند أي تغيير بالصفقات.");
 
     const initial = await getPortfolioData();
     if (!initial.assets) {
@@ -152,12 +148,19 @@ async function startMonitoring(ctx) {
     }
     previousPortfolioState = initial.assets;
 
+    // إرسال ملخص المحفظة عند تشغيل المراقبة
+    const portfolioMsg = await generatePortfolioMessage();
+    await ctx.reply(portfolioMsg, { parse_mode: "Markdown" });
+
     monitoringInterval = setInterval(async () => {
         const current = await getPortfolioData();
         if (!current.assets) return;
         const notification = checkTrades(current.assets, previousPortfolioState);
         if (notification) {
             await bot.api.sendMessage(AUTHORIZED_USER_ID, notification, { parse_mode: "Markdown" });
+            // إرسال ملخص المحفظة مباشرة بعد الإشعار
+            const updatedPortfolioMsg = await generatePortfolioMessage();
+            await bot.api.sendMessage(AUTHORIZED_USER_ID, updatedPortfolioMsg, { parse_mode: "Markdown" });
         }
         previousPortfolioState = current.assets;
     }, 60000);
@@ -170,6 +173,7 @@ async function stopMonitoring(ctx) {
     ctx.reply("🛑 تم إيقاف المراقبة.");
 }
 
+// إعداد الأوامر والأزرار
 bot.command("start", ctx => {
     const keyboard = new InlineKeyboard()
         .text("📊 عرض المحفظة", "balance")
@@ -185,12 +189,18 @@ bot.command("start", ctx => {
 bot.on("callback_query:data", async ctx => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
-    if (data === "balance") await showBalance(ctx);
+    if (data === "balance") {
+        const msg = await generatePortfolioMessage();
+        await ctx.reply(msg, { parse_mode: "Markdown" });
+    }
     if (data === "monitor") await startMonitoring(ctx);
     if (data === "stop") await stopMonitoring(ctx);
 });
 
-bot.command("balance", showBalance);
+bot.command("balance", async ctx => {
+    const msg = await generatePortfolioMessage();
+    await ctx.reply(msg, { parse_mode: "Markdown" });
+});
 bot.command("monitor", startMonitoring);
 bot.command("stop", stopMonitoring);
 
