@@ -1,4 +1,4 @@
-// index.js - Version with Market Pulse Feature
+// index.js - The Final Working Version for Railway
 
 const express = require("express");
 const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
@@ -7,7 +7,7 @@ const crypto = require("crypto");
 require("dotenv").config();
 
 // --- إعدادات أساسية ---
-const requiredEnv = ["TELEGRAM_BOT_TOKEN", "OKX_API_KEY", "OKX_API_SECRET_KEY", "OKX_API_PASSPHRASE", "AUTHORIZED_USER_ID"];
+const requiredEnv = ["TELEGRAM_BOT_TOKEN", "OKX_API_KEY", "OKX_API_SECRET_KEY", "OKX_API_PASSPHRASE", "AUTHORIZED_USER_ID", "RAILWAY_STATIC_URL"];
 for (const envVar of requiredEnv) {
   if (!process.env[envVar]) {
     console.error(`!!! متغير البيئة ${envVar} غير موجود.`);
@@ -40,10 +40,7 @@ async function getMarketTickers() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
     const data = await res.json();
-    if (data.code === "0" && data.data) {
-      return data.data;
-    }
-    return [];
+    return (data.code === "0" && data.data) ? data.data : [];
   } catch (e) { console.error("Error fetching market tickers:", e); return []; }
 }
 
@@ -102,49 +99,40 @@ async function showBalance(ctx) {
   ctx.reply(msg, { parse_mode: "Markdown" });
 }
 
-// --- *** الميزة الجديدة: نبض السوق *** ---
+// --- الميزة الجديدة: نبض السوق (مع إصلاح خطأ NaN) ---
 async function showMarketPulse(ctx) {
     await ctx.reply("⏳ لحظات... جارٍ تحليل نبض السوق.");
     const tickers = await getMarketTickers();
-    if (tickers.length === 0) {
-        return ctx.reply("❌ لا يمكن جلب بيانات السوق حالياً.");
-    }
+    if (tickers.length === 0) return ctx.reply("❌ لا يمكن جلب بيانات السوق حالياً.");
 
-    // فلترة وترتيب البيانات
     const usdtPairs = tickers
-        .filter(t => t.instId.endsWith('-USDT') && t.vol24h > 100000) // فلترة العملات ذات حجم تداول جيد
-        .map(t => ({
-            asset: t.instId.replace('-USDT', ''),
-            price: parseFloat(t.last),
-            change24h: parseFloat(t.chg24h) * 100
-        }));
+        .filter(t => t.instId.endsWith('-USDT') && parseFloat(t.vol24h) > 100000)
+        .map(t => {
+            const open24h = parseFloat(t.open24h);
+            const chg24h = parseFloat(t.chg24h);
+            const changePercentage = open24h !== 0 ? (chg24h / open24h) * 100 : 0;
+            return {
+                asset: t.instId.replace('-USDT', ''),
+                change24h: changePercentage
+            };
+        });
 
-    // الرابحون الكبار
     const gainers = [...usdtPairs].sort((a, b) => b.change24h - a.change24h).slice(0, 5);
-    // الخاسرون الكبار
     const losers = [...usdtPairs].sort((a, b) => a.change24h - b.change24h).slice(0, 5);
 
     let msg = `*📈 نبض السوق لآخر 24 ساعة 📉*\n\n`;
     msg += `*🟢 الرابحون الكبار 🟢*\n`;
-    gainers.forEach(g => {
-        msg += `*${g.asset}:* \`+${g.change24h.toFixed(2)}%\`\n`;
-    });
-
+    gainers.forEach(g => { msg += `*${g.asset}:* \`+${g.change24h.toFixed(2)}%\`\n`; });
     msg += `\n*🔴 الخاسرون الكبار 🔴*\n`;
-    losers.forEach(l => {
-        msg += `*${l.asset}:* \`${l.change24h.toFixed(2)}%\`\n`;
-    });
-    
+    losers.forEach(l => { msg += `*${l.asset}:* \`${l.change24h.toFixed(2)}%\`\n`; });
     msg += `\n_البيانات من OKX مباشرة_`;
     ctx.reply(msg, { parse_mode: "Markdown" });
 }
-
 
 // --- دوال المراقبة ---
 function checkTrades(currentAssets, previousAssets) {
     const notifications = [];
     const prevAssetsMap = new Map(previousAssets.map(a => [a.asset, a]));
-
     for (const currentAsset of currentAssets) {
         const prevAsset = prevAssetsMap.get(currentAsset.asset);
         if (!prevAsset) {
@@ -168,24 +156,21 @@ async function startMonitoring(ctx) {
   if (isMonitoring) return ctx.reply("⚠️ المراقبة تعمل بالفعل.");
   isMonitoring = true;
   await ctx.reply("✅ تم تفعيل المراقبة. سأقوم بإعلامك بالصفقات.");
-  
   const initialState = await getPortfolioData();
   if (!initialState.assets) {
       isMonitoring = false;
       return ctx.reply("❌ فشلت التهيئة.");
   }
   previousPortfolioState = initialState;
-
   monitoringInterval = setInterval(async () => {
     const currentPortfolio = await getPortfolioData();
     if (!currentPortfolio.assets) return;
-
     const tradeNotifications = checkTrades(currentPortfolio.assets, previousPortfolioState.assets);
     if (tradeNotifications) {
         await bot.api.sendMessage(AUTHORIZED_USER_ID, tradeNotifications, { parse_mode: "Markdown" });
     }
     previousPortfolioState = currentPortfolio;
-  }, 60000); // زيادة الفاصل الزمني إلى دقيقة
+  }, 60000);
 }
 
 async function stopMonitoring(ctx) {
@@ -195,19 +180,16 @@ async function stopMonitoring(ctx) {
   ctx.reply("🛑 تم إيقاف المراقبة.");
 }
 
-// --- الأوامر والـ Callbacks مع إضافة الزر الجديد ---
+// --- الأوامر والـ Callbacks ---
 const menu = new InlineKeyboard()
   .text("💰 عرض الرصيد", "show_balance").text("📈 نبض السوق", "market_pulse").row()
   .text("👁️ بدء المراقبة", "start_monitoring").text("🛑 إيقاف المراقبة", "stop_monitoring");
-  
 const welcomeMessage = `*أهلاً بك في بوت OKX المطور* 🤖\n\nاختر أحد الأوامر للبدء:`;
-
 bot.command("start", ctx => ctx.reply(welcomeMessage, { reply_markup: menu, parse_mode: "Markdown" }));
 bot.command("balance", showBalance);
-bot.command("pulse", showMarketPulse); // أمر مختصر للميزة الجديدة
+bot.command("pulse", showMarketPulse);
 bot.command("monitor", startMonitoring);
 bot.command("stop", stopMonitoring);
-
 bot.on("callback_query:data", async ctx => {
   const d = ctx.callbackQuery.data;
   await ctx.answerCallbackQuery();
@@ -216,7 +198,6 @@ bot.on("callback_query:data", async ctx => {
   if (d === "start_monitoring") await startMonitoring(ctx);
   if (d === "stop_monitoring") await stopMonitoring(ctx);
 });
-
 bot.catch((err) => console.error("--- UNCAUGHT ERROR ---", err.error));
 
 // --- التشغيل ---
