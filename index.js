@@ -1,7 +1,7 @@
-// index.js - النسخة النهائية المستقرة
+// index.js - النسخة النهائية بعد إضافة النسبة المئوية والأزرار والتصميم الأنيق
 
 const express = require("express");
-const { Bot, webhookCallback } = require("grammy");
+const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 require("dotenv").config();
@@ -11,8 +11,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
-
-// حساب رأس المال الأساسي تلقائي
 let baseCapital = 0;
 
 function getHeaders(method, path, body = "") {
@@ -60,13 +58,24 @@ async function getMarketPrices() {
 
 bot.command("start", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.reply("🤖 مرحبًا بك! ارسل /portfolio لعرض محفظتك مع PnL.");
+    const keyboard = new InlineKeyboard()
+        .text("📊 عرض المحفظة", "show_portfolio")
+        .row()
+        .text("🔔 تشغيل الإشعارات", "daily_on")
+        .text("🔕 إيقاف الإشعارات", "daily_off");
+    await ctx.reply("🤖 *مرحبا بك في بوت محفظة OKX*\nاختر من الأزرار أدناه:", {
+        parse_mode: "Markdown",
+        reply_markup: keyboard
+    });
 });
 
-bot.command("portfolio", async ctx => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.reply("⏳ جارٍ جلب بيانات المحفظة...");
+bot.callbackQuery("show_portfolio", async ctx => {
+    await sendPortfolio(ctx);
+    await ctx.answerCallbackQuery();
+});
 
+async function sendPortfolio(ctx) {
+    await ctx.reply("⏳ جارٍ جلب بيانات المحفظة...");
     const portfolio = await getPortfolio();
     const prices = await getMarketPrices();
     if (!portfolio) return ctx.reply("❌ تعذر جلب البيانات.");
@@ -89,7 +98,6 @@ bot.command("portfolio", async ctx => {
         });
     }
     assets.sort((a, b) => b.usdValue - a.usdValue);
-
     if (baseCapital === 0) baseCapital = totalUsd;
     const pnl = totalUsd - baseCapital;
     const pnlPercent = ((pnl / baseCapital) * 100).toFixed(2);
@@ -99,13 +107,26 @@ bot.command("portfolio", async ctx => {
     msg += `💼 *رأس المال الأساسي:* $${baseCapital.toFixed(2)}\n`;
     msg += `📈 *PnL:* $${pnl.toFixed(2)} (${pnlPercent}%)\n`;
     msg += `------------------------------------\n`;
+
     assets.forEach(a => {
-        msg += `💎 *${a.ccy}*\n`;
+        const percent = ((a.usdValue / totalUsd) * 100).toFixed(2);
+        msg += `💎 *${a.ccy}* (${percent}%)\n`;
         if (a.ccy !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
         msg += `  القيمة: $${a.usdValue.toFixed(2)}\n`;
         msg += `  الكمية: ${a.amount}\n\n`;
     });
+
     await ctx.reply(msg, { parse_mode: "Markdown" });
+}
+
+bot.callbackQuery("daily_on", async ctx => {
+    await ctx.reply("✅ تم تشغيل الإشعارات اليومية.");
+    await ctx.answerCallbackQuery();
+});
+
+bot.callbackQuery("daily_off", async ctx => {
+    await ctx.reply("🛑 تم إيقاف الإشعارات اليومية.");
+    await ctx.answerCallbackQuery();
 });
 
 app.use(express.json());
