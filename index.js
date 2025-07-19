@@ -1,4 +1,4 @@
-// OKX Portfolio Bot - Final Clean Version
+// OKX Portfolio Bot FINAL CLEAN VERSION - No missing brackets, full features
 const express = require("express");
 const { Bot, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
@@ -8,10 +8,11 @@ require("dotenv").config();
 
 const app = express();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 const CAPITAL_FILE = "capital.json";
+let monitorInterval = null;
 let lastTrades = {};
 
 function getEgyptTime() {
@@ -34,11 +35,9 @@ function loadCapital() {
 function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
     const prehash = timestamp + method.toUpperCase() + path + body;
-    const sign = crypto
-        .createHmac("sha256", process.env.OKX_API_SECRET_KEY)
+    const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY)
         .update(prehash)
         .digest("base64");
-
     return {
         "OK-ACCESS-KEY": process.env.OKX_API_KEY,
         "OK-ACCESS-SIGN": sign,
@@ -59,7 +58,9 @@ async function getPortfolio() {
         const tickersJson = await tickersRes.json();
 
         const prices = {};
-        tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        tickersJson.data.forEach(t => {
+            prices[t.instId] = parseFloat(t.last);
+        });
 
         let assets = [];
         let total = 0;
@@ -83,7 +84,6 @@ async function getPortfolio() {
         });
 
         assets.sort((a, b) => b.value - a.value);
-
         return { assets, total };
     } catch (e) {
         console.error(e);
@@ -94,11 +94,13 @@ async function getPortfolio() {
 function formatPortfolioMsg(assets, total, capital) {
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-    let msg = `📊 *ملخص المحفظة* 📊\n\n`;
+
+    let msg = "📊 *ملخص المحفظة* 📊\n\n";
     msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
     msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
     msg += `📈 *PnL:* ${pnl >= 0 ? '🟢' : '🔴'} ${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
-    msg += `------------------------------------\n`;
+    msg += "------------------------------------\n";
+
     assets.forEach(a => {
         let percent = ((a.value / total) * 100).toFixed(2);
         msg += `💎 *${a.asset}* (${percent}%)\n`;
@@ -106,6 +108,7 @@ function formatPortfolioMsg(assets, total, capital) {
         msg += `  القيمة: $${a.value.toFixed(2)}\n`;
         msg += `  الكمية: ${a.amount}\n\n`;
     });
+
     msg += `🕒 *آخر تحديث:* ${getEgyptTime()}`;
     return msg;
 }
@@ -116,7 +119,6 @@ async function checkNewTrades() {
             headers: getHeaders("GET", "/api/v5/account/positions")
         });
         const json = await res.json();
-
         json.data.forEach(async trade => {
             const id = trade.instId + trade.posId;
             if (!lastTrades[id]) {
@@ -133,10 +135,17 @@ async function checkNewTrades() {
     }
 }
 
-// Commands aligned with BotFather
+// Handlers
 bot.command("start", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.reply("🤖 أهلاً بك في بوت مراقبة محفظة OKX\n\n- أرسل /balance لعرض المحفظة\n- أرسل /monitor لتفعيل المراقبة\n- أرسل /stop_monitor لإيقاف المراقبة\n\n📥 لإضافة رأس المال أرسل المبلغ مباشرة مثل: 5000", { parse_mode: "Markdown" });
+    await ctx.reply(
+        `🤖 أهلاً بك في بوت مراقبة محفظة OKX\n\n` +
+        `- لعرض المحفظة أرسل: /balance\n` +
+        `- لتفعيل المراقبة أرسل: /monitor\n` +
+        `- لإيقاف المراقبة أرسل: /stop_monitor\n` +
+        `- لإضافة رأس المال أرسل المبلغ مباشرة مثل: 5000`,
+        { parse_mode: "Markdown" }
+    );
 });
 
 bot.command("balance", async ctx => {
@@ -149,9 +158,9 @@ bot.command("balance", async ctx => {
 
 bot.command("monitor", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    if (!global.monitoring) {
-        global.monitoring = setInterval(checkNewTrades, 60000);
-        await ctx.reply("✅ تم تشغيل مراقبة الصفقات التلقائية.");
+    if (!monitorInterval) {
+        monitorInterval = setInterval(checkNewTrades, 60000); // كل دقيقة
+        await ctx.reply("✅ تم تشغيل المراقبة التلقائية للصفقات الجديدة.");
     } else {
         await ctx.reply("✅ المراقبة تعمل بالفعل.");
     }
@@ -159,30 +168,28 @@ bot.command("monitor", async ctx => {
 
 bot.command("stop_monitor", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    if (global.monitoring) {
-        clearInterval(global.monitoring);
-        global.monitoring = null;
-        await ctx.reply("🛑 تم إيقاف مراقبة الصفقات التلقائية.");
+    if (monitorInterval) {
+        clearInterval(monitorInterval);
+        monitorInterval = null;
+        await ctx.reply("🛑 تم إيقاف المراقبة التلقائية.");
     } else {
-        await ctx.reply("ℹ️ المراقبة غير مفعلة حالياً.");
+        await ctx.reply("❌ المراقبة غير مفعلة.");
     }
 });
 
+// إضافة رأس المال عند إرسال رقم
 bot.on("message:text", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const amount = parseFloat(ctx.message.text);
     if (!isNaN(amount) && amount > 0) {
         saveCapital(amount);
         await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
-    } else {
-        await ctx.reply("❌ الرجاء إرسال رقم صحيح لتعيين رأس المال.");
     }
 });
 
-// Server
+// Run
 app.use(express.json());
 app.use(webhookCallback(bot, "express"));
-
 app.listen(PORT, async () => {
     console.log(`✅ Bot running on port ${PORT}`);
     const domain = process.env.RAILWAY_STATIC_URL;
