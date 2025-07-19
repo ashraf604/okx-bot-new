@@ -1,7 +1,9 @@
 // OKX Portfolio Bot with PnL, Capital Setting, Egypt TZ, Live Trade Notifications
+// ** تم التعديل لاستخدام أزرار الرد الدائمة (ReplyKeyboard) **
 
 const express = require("express");
-const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
+// تم تغيير InlineKeyboard إلى Keyboard
+const { Bot, Keyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -15,24 +17,32 @@ const API_BASE_URL = "https://www.okx.com";
 const CAPITAL_FILE = "capital.json";
 let lastTrades = {}; // لتتبع الصفقات وعدم التكرار
 let waitingForCapital = false; // لتفعيل انتظار رأس المال بعد الضغط على الزر
+let monitoringInterval = null; // لتخزين مؤشر المراقبة
 
+// دالة للحصول على الوقت بتوقيت مصر
 function getEgyptTime() {
     return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
 }
 
+// دالة لحفظ رأس المال في ملف
 function saveCapital(amount) {
     fs.writeFileSync(CAPITAL_FILE, JSON.stringify({ capital: amount }));
 }
 
+// دالة لتحميل رأس المال من ملف
 function loadCapital() {
     try {
-        const data = JSON.parse(fs.readFileSync(CAPITAL_FILE));
-        return data.capital;
+        if (fs.existsSync(CAPITAL_FILE)) {
+            const data = JSON.parse(fs.readFileSync(CAPITAL_FILE));
+            return data.capital;
+        }
+        return 0; // إذا لم يكن الملف موجودًا
     } catch {
         return 0;
     }
 }
 
+// دالة لإنشاء الترويسات المطلوبة لـ OKX API
 function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
     const prehash = timestamp + method.toUpperCase() + path + body;
@@ -49,6 +59,7 @@ function getHeaders(method, path, body = "") {
     };
 }
 
+// دالة لجلب بيانات المحفظة
 async function getPortfolio() {
     try {
         const res = await fetch(`${API_BASE_URL}/api/v5/account/balance`, {
@@ -56,41 +67,51 @@ async function getPortfolio() {
         });
         const json = await res.json();
 
+        if (json.code !== '0') {
+             console.error("OKX API Error (Balance):", json.msg);
+             return { assets: [], total: 0, error: `فشل جلب بيانات المحفظة: ${json.msg}` };
+        }
+
         const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
         const tickersJson = await tickersRes.json();
 
         const prices = {};
-        tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        if (tickersJson.data) {
+            tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        }
 
         let assets = [];
         let total = 0;
 
-        json.data[0].details.forEach(asset => {
-            const amount = parseFloat(asset.eq);
-            if (amount > 0) {
-                const instId = `${asset.ccy}-USDT`;
-                const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
-                const value = amount * price;
-                if (value >= 1) {
-                    assets.push({
-                        asset: asset.ccy,
-                        price,
-                        value,
-                        amount,
-                    });
-                    total += value;
+        if (json.data && json.data[0] && json.data[0].details) {
+            json.data[0].details.forEach(asset => {
+                const amount = parseFloat(asset.eq);
+                if (amount > 0) {
+                    const instId = `${asset.ccy}-USDT`;
+                    const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
+                    const value = amount * price;
+                    if (value >= 1) {
+                        assets.push({
+                            asset: asset.ccy,
+                            price,
+                            value,
+                            amount,
+                        });
+                        total += value;
+                    }
                 }
-            }
-        });
+            });
+        }
 
         assets.sort((a, b) => b.value - a.value);
         return { assets, total };
     } catch (e) {
         console.error(e);
-        return { assets: [], total: 0 };
+        return { assets: [], total: 0, error: "حدث خطأ غير متوقع عند الاتصال بالمنصة." };
     }
 }
 
+// دالة لتنسيق رسالة المحفظة
 function formatPortfolioMsg(assets, total, capital) {
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
@@ -98,11 +119,11 @@ function formatPortfolioMsg(assets, total, capital) {
     let msg = `📊 *ملخص المحفظة* 📊\n\n`;
     msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
     msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
-    msg += `📈 *PnL:* ${pnl >= 0 ? '🟢' : '🔴'} ${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
+    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
     msg += `------------------------------------\n`;
 
     assets.forEach(a => {
-        let percent = ((a.value / total) * 100).toFixed(2);
+        let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
         msg += `💎 *${a.asset}* (${percent}%)\n`;
         if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
         msg += `  القيمة: $${a.value.toFixed(2)}\n`;
@@ -113,88 +134,138 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
+// دالة للتحقق من الصفقات الجديدة
 async function checkNewTrades() {
     try {
         const res = await fetch(`${API_BASE_URL}/api/v5/account/positions`, {
             headers: getHeaders("GET", "/api/v5/account/positions"),
         });
         const json = await res.json();
+        
+        if (json.code !== '0') {
+            console.error("OKX API Error (Positions):", json.msg);
+            return;
+        }
 
-        json.data.forEach(async trade => {
-            const id = trade.instId + trade.posId;
-            if (!lastTrades[id]) {
-                lastTrades[id] = true;
-                await bot.api.sendMessage(
-                    AUTHORIZED_USER_ID,
-                    `🚨 *تم كشف صفقة جديدة: ${trade.instId}*\n🪙 الكمية: ${trade.pos}\n💰 القيمة: ${trade.notional}\n📈 الجانب: ${trade.posSide}`,
-                    { parse_mode: "Markdown" }
-                );
-            }
-        });
+        if (json.data) {
+            json.data.forEach(async trade => {
+                const id = trade.instId + trade.posId;
+                if (!lastTrades[id] && parseFloat(trade.pos) > 0) {
+                    lastTrades[id] = true;
+                    await bot.api.sendMessage(
+                        AUTHORIZED_USER_ID,
+                        `🚨 *تم كشف صفقة جديدة: ${trade.instId}*\n\n🪙 *الكمية:* ${trade.pos}\n💰 *القيمة الاسمية:* $${parseFloat(trade.notionalUsd).toFixed(2)}\n📈 *الاتجاه:* ${trade.posSide}`,
+                        { parse_mode: "Markdown" }
+                    );
+                }
+            });
+        }
     } catch (e) {
-        console.error(e);
+        console.error("Error checking new trades:", e);
     }
 }
 
-// الأوامر
-bot.command("start", async ctx => {
+// === الأوامر ومعالجات الأزرار ===
+
+// الأمر /start لعرض لوحة المفاتيح الرئيسية
+bot.command("start", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const keyboard = new InlineKeyboard()
-        .text("📊 عرض المحفظة", "refresh")
-        .text("⚙️ تعيين رأس المال", "setcapital")
-        .text("👁️ تشغيل مراقبة الصفقات", "monitor");
+    
+    // تم استخدام Keyboard هنا لإنشاء أزرار دائمة
+    const mainKeyboard = new Keyboard()
+        .text("📊 عرض المحفظة").row()
+        .text("⚙️ تعيين رأس المال").row()
+        .text("👁️ تشغيل مراقبة الصفقات")
+        .text("🛑 إيقاف مراقبة الصفقات")
+        .resized(); // .resized() يجعل الأزرار بحجم مناسب
 
     await ctx.reply(
         "🤖 *أهلاً بك في بوت مراقبة محفظة OKX*\n\n- اختر من الأزرار أدناه.",
-        { parse_mode: "Markdown", reply_markup: keyboard }
+        { 
+            parse_mode: "Markdown",
+            reply_markup: mainKeyboard 
+        }
     );
 });
 
-bot.callbackQuery("setcapital", async ctx => {
+// تم استبدال callbackQuery بـ hears لمعالجة ضغطات الأزرار
+bot.hears("📊 عرض المحفظة", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.answerCallbackQuery();
-    waitingForCapital = true;
-    await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000");
-});
-
-// استقبال الرسائل العامة لتعيين رأس المال
-bot.on("message:text", async ctx => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    if (waitingForCapital) {
-        const amount = parseFloat(ctx.message.text);
-        if (!isNaN(amount) && amount > 0) {
-            saveCapital(amount);
-            waitingForCapital = false;
-            await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
-        } else {
-            await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا مثل: 5000");
-        }
+    await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
+    const { assets, total, error } = await getPortfolio();
+    if (error) {
+        await ctx.reply(`❌ ${error}`);
+        return;
     }
-});
-
-bot.callbackQuery("refresh", async ctx => {
-    await ctx.answerCallbackQuery();
-    const { assets, total } = await getPortfolio();
     const capital = loadCapital();
     const msg = formatPortfolioMsg(assets, total, capital);
     await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
-bot.callbackQuery("monitor", async ctx => {
-    await ctx.answerCallbackQuery("✅ تم تشغيل مراقبة الصفقات تلقائيًا.");
-    if (!global.monitoring) {
-        global.monitoring = setInterval(checkNewTrades, 60000); // كل دقيقة
+bot.hears("⚙️ تعيين رأس المال", async (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    waitingForCapital = true;
+    await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000");
+});
+
+bot.hears("👁️ تشغيل مراقبة الصفقات", async (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    if (!monitoringInterval) {
+        await checkNewTrades(); // تحقق فوري عند التشغيل
+        monitoringInterval = setInterval(checkNewTrades, 60000); // ثم كل دقيقة
+        await ctx.reply("✅ تم تشغيل مراقبة الصفقات التلقائية.");
+    } else {
+        await ctx.reply("ℹ️ المراقبة تعمل بالفعل.");
     }
 });
 
+bot.hears("🛑 إيقاف مراقبة الصفقات", async (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+        monitoringInterval = null;
+        await ctx.reply("🛑 تم إيقاف مراقبة الصفقات التلقائية.");
+    } else {
+        await ctx.reply("ℹ️ المراقبة متوقفة بالفعل.");
+    }
+});
+
+// استقبال الرسائل العامة (فقط لتعيين رأس المال)
+bot.on("message:text", async (ctx) => {
+    // تجاهل إذا لم يكن المستخدم المصرح له أو إذا كانت رسالة من زر
+    if (ctx.from.id !== AUTHORIZED_USER_ID || !waitingForCapital) {
+        return;
+    }
+
+    const amount = parseFloat(ctx.message.text);
+    if (!isNaN(amount) && amount > 0) {
+        saveCapital(amount);
+        waitingForCapital = false;
+        await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
+    } else {
+        await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا موجبًا مثل: 5000");
+    }
+});
+
+// === إعداد الخادم والويب هوك ===
 app.use(express.json());
 app.use(webhookCallback(bot, "express"));
 
 app.listen(PORT, async () => {
     console.log(`✅ Bot running on port ${PORT}`);
-    const domain = process.env.RAILWAY_STATIC_URL;
-    if (domain) {
-        await bot.api.setWebhook(`https://${domain}/${bot.token}`);
-        console.log(`✅ Webhook set to: https://${domain}/${bot.token}`);
+    try {
+        const domain = process.env.RAILWAY_STATIC_URL;
+        if (domain) {
+            const webhookUrl = `https://${domain}`;
+            await bot.api.setWebhook(webhookUrl, {
+                drop_pending_updates: true // لتجاهل الرسائل القديمة
+            });
+            console.log(`✅ Webhook set to: ${webhookUrl}`);
+        } else {
+            console.warn("RAILWAY_STATIC_URL not set. Webhook not configured. Bot might not work in serverless environment.");
+        }
+    } catch (e) {
+        console.error("Failed to set webhook:", e);
     }
 });
+
