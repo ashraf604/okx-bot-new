@@ -1,119 +1,72 @@
-// OKX Portfolio Monitor Bot (clean version, hides < $1 coins, clear buttons)
+// OKX Portfolio Bot with PnL, Capital Setting, Clean Filtering, Egypt TZ, and Manual Refresh
 
-const express = require("express"); const { Bot, InlineKeyboard, webhookCallback } = require("grammy"); const fetch = require("node-fetch"); const crypto = require("crypto"); require("dotenv").config();
+const express = require("express"); const { Bot, InlineKeyboard, webhookCallback } = require("grammy"); const fetch = require("node-fetch"); const fs = require("fs"); require("dotenv").config();
 
-const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID || "0", 10); const API_BASE_URL = "https://www.okx.com"; const PORT = process.env.PORT || 3000;
+const app = express(); const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const PORT = process.env.PORT || 3000; const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID); const API_BASE_URL = "https://www.okx.com"; const CAPITAL_FILE = "capital.json";
 
-let monitoring = false; let monitorInterval = null; let previousAssets = []; let baseCapital = parseFloat(process.env.BASE_CAPITAL || "0");
+// Egypt Timezone function getEgyptTime() { return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }); }
 
-const app = express(); app.use(express.json());
+// Save and Load Capital function saveCapital(amount) { fs.writeFileSync(CAPITAL_FILE, JSON.stringify({ capital: amount })); } function loadCapital() { try { const data = JSON.parse(fs.readFileSync(CAPITAL_FILE)); return data.capital; } catch { return 0; } }
 
-function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const bodyString = typeof body === "object" ? JSON.stringify(body) : body; const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY) .update(timestamp + method.toUpperCase() + path + bodyString) .digest("base64"); return { "Content-Type": "application/json", "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "x-simulated-trading": "0", }; }
+// OKX Headers function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + body; const crypto = require("crypto"); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
-async function getMarketTickers() { const res = await fetch(${API_BASE_URL}/api/v5/market/tickers?instType=SPOT); const data = await res.json(); return data.code === "0" ? data.data : []; }
+// Get Portfolio Data async function getPortfolio() { try { const res = await fetch(${API_BASE_URL}/api/v5/account/balance, { headers: getHeaders("GET", "/api/v5/account/balance") }); const json = await res.json(); const tickersRes = await fetch(${API_BASE_URL}/api/v5/market/tickers?instType=SPOT); const tickersJson = await tickersRes.json(); const prices = {}; tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
 
-async function getPortfolioData() { const res = await fetch(${API_BASE_URL}/api/v5/account/balance, { headers: getHeaders("GET", "/api/v5/account/balance") }); const data = await res.json(); if (data.code !== "0") return { assets: [], totalUsd: 0 };
-
-const tickers = await getMarketTickers();
-const prices = {};
-tickers.forEach(t => prices[t.instId] = parseFloat(t.last));
-
-const portfolio = [];
-data.data[0].details.forEach(asset => {
-    const amount = parseFloat(asset.eq);
-    if (amount > 0) {
-        const instId = `${asset.ccy}-USDT`;
-        const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
-        const usdValue = amount * price;
-        if (usdValue >= 0.01) {
-            portfolio.push({
-                asset: asset.ccy,
-                price,
-                usdValue,
-                amount
-            });
+let assets = [];
+    let total = 0;
+    json.data[0].details.forEach(asset => {
+        const amount = parseFloat(asset.eq);
+        if (amount > 0) {
+            const instId = `${asset.ccy}-USDT`;
+            const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
+            const value = amount * price;
+            if (value >= 1) {
+                assets.push({
+                    asset: asset.ccy,
+                    price,
+                    value,
+                    amount
+                });
+                total += value;
+            }
         }
-    }
-});
+    });
 
-const totalUsd = portfolio.reduce((acc, a) => acc + a.usdValue, 0);
-portfolio.forEach(a => a.percentage = totalUsd > 0 ? (a.usdValue / totalUsd) * 100 : 0);
-portfolio.sort((a, b) => b.usdValue - a.usdValue);
+    assets.sort((a, b) => b.value - a.value);
 
-return { assets: portfolio, totalUsd };
+    return { assets, total };
+} catch (e) {
+    console.error(e);
+    return { assets: [], total: 0 };
+}
 
 }
 
-async function showPortfolio(ctx) { const { assets, totalUsd } = await getPortfolioData(); if (!assets || assets.length === 0) return ctx.reply("❌ لا توجد بيانات محفظة حالياً.");
+// Format Portfolio Message function formatPortfolioMsg(assets, total, capital) { let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
 
 let msg = `📊 *ملخص المحفظة* 📊\n\n`;
-msg += `💰 *القيمة الحالية:* $${totalUsd.toFixed(2)}\n`;
-if (baseCapital > 0) {
-    const pnl = totalUsd - baseCapital;
-    const pnlPerc = (pnl / baseCapital) * 100;
-    const pnlEmoji = pnl >= 0 ? "🟢" : "🔴";
-    msg += `💼 *رأس المال الأساسي:* $${baseCapital.toFixed(2)}\n`;
-    msg += `📈 PnL: ${pnlEmoji} ${pnl.toFixed(2)} (${pnlPerc.toFixed(2)}%)\n`;
-}
+msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
+msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
+msg += `📈 *PnL:* ${pnl >= 0 ? '🟢' : '🔴'} ${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
 msg += `------------------------------------\n`;
-
-assets.filter(a => a.usdValue >= 1).forEach(a => {
+assets.forEach(a => {
     msg += `💎 *${a.asset}*\n`;
     if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
-    msg += `  القيمة: $${a.usdValue.toFixed(2)} (${a.percentage.toFixed(2)}%)\n`;
-    msg += `  الكمية: ${a.amount.toFixed(6)}\n\n`;
+    msg += `  القيمة: $${a.value.toFixed(2)}\n`;
+    msg += `  الكمية: ${a.amount}\n\n`;
 });
-
-const cairoTime = new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' });
-msg += `آخر تحديث: ${cairoTime}`;
-
-await ctx.reply(msg, { parse_mode: "Markdown" });
+msg += `🕒 *آخر تحديث:* ${getEgyptTime()}`;
+return msg;
 
 }
 
-async function startMonitoring(ctx) { if (monitoring) return ctx.reply("⚠️ المراقبة مفعلة بالفعل."); monitoring = true; previousAssets = (await getPortfolioData()).assets; await ctx.reply("✅ تم تشغيل مراقبة المحفظة.");
+// Commands bot.command("start", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const keyboard = new InlineKeyboard() .text("📊 عرض المحفظة", "refresh") .text("⚙️ تعيين رأس المال", "setcapital"); await ctx.reply("🤖 أهلاً بك في بوت مراقبة محفظة OKX\n\n- اضغط لعرض المحفظة أو تعيين رأس المال.", { parse_mode: "Markdown", reply_markup: keyboard }); });
 
-monitorInterval = setInterval(async () => {
-    const { assets } = await getPortfolioData();
-    if (!assets) return;
-    const changes = [];
+bot.command("setcapital", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const parts = ctx.message.text.split(" "); if (parts.length === 2) { const amount = parseFloat(parts[1]); if (!isNaN(amount) && amount > 0) { saveCapital(amount); await ctx.reply(✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}); } else { await ctx.reply("❌ المبلغ غير صالح."); } } else { await ctx.reply("❌ استخدم الصيغة: /setcapital 5000"); } });
 
-    assets.forEach(a => {
-        const prev = previousAssets.find(pa => pa.asset === a.asset);
-        if (prev) {
-            const diff = a.amount - prev.amount;
-            if (Math.abs(diff * a.price) >= 1) {
-                const action = diff > 0 ? "🟢 شراء" : "🔴 بيع";
-                changes.push(`${action}: ${a.asset} - ${Math.abs(diff).toFixed(4)}`);
-            }
-        } else if (a.usdValue >= 1) {
-            changes.push(`🟢 شراء جديد: ${a.asset} - ${a.amount.toFixed(4)}`);
-        }
-    });
+bot.callbackQuery("refresh", async ctx => { await ctx.answerCallbackQuery(); const { assets, total } = await getPortfolio(); const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); });
 
-    previousAssets.forEach(pa => {
-        const curr = assets.find(a => a.asset === pa.asset);
-        if (!curr && pa.usdValue >= 1) {
-            changes.push(`🔴 بيع كامل: ${pa.asset} - ${pa.amount.toFixed(4)}`);
-        }
-    });
+app.use(express.json()); app.use(webhookCallback(bot, "express"));
 
-    previousAssets = assets;
-
-    if (changes.length > 0) {
-        await bot.api.sendMessage(AUTHORIZED_USER_ID, `📈 *حركة الصفقات*:\n\n${changes.join("\n")}`, { parse_mode: "Markdown" });
-    }
-}, 300000); // كل 5 دقائق
-
-}
-
-async function stopMonitoring(ctx) { if (!monitoring) return ctx.reply("ℹ️ المراقبة متوقفة بالفعل."); clearInterval(monitorInterval); monitoring = false; await ctx.reply("🛑 تم إيقاف مراقبة المحفظة."); }
-
-bot.command("start", ctx => ctx.reply( "🤖 مرحباً بك في بوت مراقبة محفظة OKX.\n\n" + "- /portfolio لعرض المحفظة.\n" + "- /startmonitor لتفعيل المراقبة.\n" + "- /stopmonitor لإيقاف المراقبة.\n" + "- /setcapital 5000 لتحديد رأس المال لحساب PnL.", ));
-
-bot.command("portfolio", showPortfolio); bot.command("startmonitor", startMonitoring); bot.command("stopmonitor", stopMonitoring); bot.command("setcapital", async ctx => { const value = parseFloat(ctx.message.text.split(" ")[1]); if (isNaN(value) || value <= 0) { await ctx.reply("❌ برجاء إدخال رقم صحيح."); } else { baseCapital = value; await ctx.reply(✅ تم تحديث رأس المال إلى: $${baseCapital.toFixed(2)}); } });
-
-bot.use(async (ctx, next) => { if (ctx.from?.id !== AUTHORIZED_USER_ID) return; await next(); });
-
-const webhook = webhookCallback(bot, "express"); app.use(webhook); app.listen(PORT, () => console.log(✅ Bot running on port ${PORT}));
+app.listen(PORT, async () => { console.log(✅ Bot running on port ${PORT}); const domain = process.env.RAILWAY_STATIC_URL; if (domain) { await bot.api.setWebhook(https://${domain}/${bot.token}); console.log(✅ Webhook set to: https://${domain}/${bot.token}); } });
 
