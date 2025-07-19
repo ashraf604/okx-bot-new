@@ -1,12 +1,11 @@
 // OKX Portfolio Bot with Full Monitoring (Trades & Price Alerts)
-// ** تمت إعادة ميزة مراقبة الصفقات الجديدة بجانب تنبيهات الأسعار **
+// ** تم إصلاح خطأ 'uuid' باستبداله بوظيفة crypto المدمجة **
 
 const express = require("express");
 const { Bot, Keyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
-const crypto = require("crypto");
+const crypto = require("crypto"); // سنستخدم crypto لإنشاء ID
 const fs = require("fs");
-const { v4: uuidv4 } = require('uuid');
 require("dotenv").config();
 
 const app = express();
@@ -18,7 +17,7 @@ const API_BASE_URL = "https://www.okx.com";
 // ملفات لتخزين البيانات
 const CAPITAL_FILE = "capital.json";
 const ALERTS_FILE = "alerts.json";
-const TRADES_FILE = "last_trades.json"; // ملف لتتبع الصفقات
+const TRADES_FILE = "last_trades.json";
 
 // متغيرات لتتبع حالة المحادثة
 let waitingForCapital = false;
@@ -36,7 +35,6 @@ function getEgyptTime() {
     return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
 }
 
-// دوالจัดการ رأس المال
 function saveCapital(amount) {
     fs.writeFileSync(CAPITAL_FILE, JSON.stringify({ capital: amount }));
 }
@@ -48,7 +46,6 @@ function loadCapital() {
     } catch { return 0; }
 }
 
-// دوالจัดการ التنبيهات
 function loadAlerts() {
     try {
         if (fs.existsSync(ALERTS_FILE)) return JSON.parse(fs.readFileSync(ALERTS_FILE));
@@ -60,7 +57,6 @@ function saveAlerts(alerts) {
     fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
 }
 
-// دوالจัดการ الصفقات المراقبة
 function loadLastTrades() {
     try {
         if (fs.existsSync(TRADES_FILE)) return JSON.parse(fs.readFileSync(TRADES_FILE));
@@ -72,7 +68,6 @@ function saveLastTrades(trades) {
     fs.writeFileSync(TRADES_FILE, JSON.stringify(trades, null, 2));
 }
 
-// دالة لإنشاء ترويسات OKX API
 function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
     const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body);
@@ -134,13 +129,11 @@ async function getTickerPrice(instId) {
 function formatPortfolioMsg(assets, total, capital) {
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-
     let msg = `📊 *ملخص المحفظة* 📊\n\n`;
     msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
     msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
     msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
     msg += `------------------------------------\n`;
-
     assets.forEach(a => {
         let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
         msg += `💎 *${a.asset}* (${percent}%)\n`;
@@ -148,60 +141,41 @@ function formatPortfolioMsg(assets, total, capital) {
         msg += `  القيمة: $${a.value.toFixed(2)}\n`;
         msg += `  الكمية: ${a.amount}\n\n`;
     });
-
     msg += `🕒 *آخر تحديث:* ${getEgyptTime()}`;
     return msg;
 }
 
-// ** دالة مراقبة الصفقات الجديدة (تمت إعادتها) **
 async function checkNewTrades() {
     try {
         const res = await fetch(`${API_BASE_URL}/api/v5/account/positions`, { headers: getHeaders("GET", "/api/v5/account/positions") });
         const json = await res.json();
-        
-        if (json.code !== '0') {
-            console.error("OKX API Error (Positions):", json.msg);
-            return;
-        }
-
+        if (json.code !== '0') { console.error("OKX API Error (Positions):", json.msg); return; }
         const lastTrades = loadLastTrades();
         if (json.data) {
             json.data.forEach(async trade => {
                 const id = trade.instId + trade.posId;
                 if (!lastTrades[id] && parseFloat(trade.pos) > 0) {
-                    lastTrades[id] = true; // تذكر الصفقة لتجنب التكرار
-                    await bot.api.sendMessage(
-                        AUTHORIZED_USER_ID,
-                        `🚨 *تم كشف صفقة جديدة: ${trade.instId}*\n\n🪙 *الكمية:* ${trade.pos}\n💰 *القيمة الاسمية:* $${parseFloat(trade.notionalUsd).toFixed(2)}\n📈 *الاتجاه:* ${trade.posSide}`,
-                        { parse_mode: "Markdown" }
-                    );
+                    lastTrades[id] = true;
+                    await bot.api.sendMessage(AUTHORIZED_USER_ID, `🚨 *تم كشف صفقة جديدة: ${trade.instId}*\n\n🪙 *الكمية:* ${trade.pos}\n💰 *القيمة الاسمية:* $${parseFloat(trade.notionalUsd).toFixed(2)}\n📈 *الاتجاه:* ${trade.posSide}`, { parse_mode: "Markdown" });
                 }
             });
-            saveLastTrades(lastTrades); // حفظ قائمة الصفقات المحدثة
+            saveLastTrades(lastTrades);
         }
-    } catch (e) {
-        console.error("Error checking new trades:", e);
-    }
+    } catch (e) { console.error("Error checking new trades:", e); }
 }
 
-// دالة التحقق من تنبيهات الأسعار
 async function checkAlerts() {
     const alerts = loadAlerts().filter(a => a.active);
     if (alerts.length === 0) return;
-
     const uniqueInstIds = [...new Set(alerts.map(a => a.instId))];
-
     for (const instId of uniqueInstIds) {
         const { price: currentPrice, error } = await getTickerPrice(instId);
         if (error) continue;
-
         alerts.filter(a => a.instId === instId).forEach(async (alert) => {
             const targetPrice = alert.price;
             let conditionMet = false;
-
             if (alert.condition === '>' && currentPrice > targetPrice) conditionMet = true;
             else if (alert.condition === '<' && currentPrice < targetPrice) conditionMet = true;
-
             if (conditionMet) {
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, `🔔 *تنبيه سعر!* 🔔\n\n- العملة: *${alert.instId}*\n- الشرط: وصل السعر *${alert.condition === '>' ? 'أعلى من' : 'أقل من'} ${targetPrice}*\n- السعر الحالي: *${currentPrice}*`, { parse_mode: "Markdown" });
                 const allAlerts = loadAlerts();
@@ -216,23 +190,16 @@ async function checkAlerts() {
     }
 }
 
-
 // === واجهة البوت والأوامر ===
 
 bot.command("start", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    
     const mainKeyboard = new Keyboard()
         .text("📊 عرض المحفظة").row()
         .text("👁️ تشغيل مراقبة الصفقات").text("🛑 إيقاف مراقبة الصفقات").row()
         .text("🔔 ضبط تنبيه سعر").text("📄 عرض التنبيهات").text("🗑️ حذف تنبيه").row()
-        .text("📈 سعر عملة").text("⚙️ تعيين رأس المال")
-        .resized();
-
-    await ctx.reply("🤖 *بوت OKX للمراقبة الشاملة*\n\n- تم تفعيل جميع الميزات.", { 
-        parse_mode: "Markdown",
-        reply_markup: mainKeyboard 
-    });
+        .text("📈 سعر عملة").text("⚙️ تعيين رأس المال").resized();
+    await ctx.reply("🤖 *بوت OKX للمراقبة الشاملة*\n\n- تم إصلاح الخطأ وجاهز للعمل.", { parse_mode: "Markdown", reply_markup: mainKeyboard });
 });
 
 // معالجات الأزرار
@@ -258,12 +225,11 @@ bot.hears("📈 سعر عملة", (ctx) => {
     ctx.reply("📈 أرسل رمز العملة (مثال: BTC-USDT).");
 });
 
-// ** أزرار مراقبة الصفقات (تمت إعادتها) **
 bot.hears("👁️ تشغيل مراقبة الصفقات", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     if (!tradeMonitoringInterval) {
-        await checkNewTrades(); // تحقق فوري
-        tradeMonitoringInterval = setInterval(checkNewTrades, 60000); // ثم كل دقيقة
+        await checkNewTrades();
+        tradeMonitoringInterval = setInterval(checkNewTrades, 60000);
         await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة.");
     } else {
         await ctx.reply("ℹ️ مراقبة الصفقات تعمل بالفعل.");
@@ -281,11 +247,28 @@ bot.hears("🛑 إيقاف مراقبة الصفقات", async (ctx) => {
     }
 });
 
-// أزرار تنبيهات الأسعار
-bot.hears("🔔 ضبط تنبيه سعر", (ctx) => { /* ... الكود كما هو ... */ });
-bot.hears("📄 عرض التنبيهات", (ctx) => { /* ... الكود كما هو ... */ });
-bot.hears("🗑️ حذف تنبيه", (ctx) => { /* ... الكود كما هو ... */ });
+bot.hears("🔔 ضبط تنبيه سعر", (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    waitingForAlert = true; waitingForCapital = waitingForPrice = waitingForAlertDeletion = false;
+    ctx.reply("📝 *أرسل تفاصيل التنبيه بالصيغة التالية:*\n`SYMBOL > PRICE` أو `SYMBOL < PRICE`\n\n*أمثلة:*\n- `BTC-USDT > 65000`\n- `ETH-USDT < 3000`", { parse_mode: "Markdown" });
+});
 
+bot.hears("📄 عرض التنبيهات", (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    const alerts = loadAlerts().filter(a => a.active);
+    if (alerts.length === 0) return ctx.reply("ℹ️ لا توجد تنبيهات نشطة حاليًا.");
+    let msg = "🔔 *قائمة التنبيهات النشطة:*\n\n";
+    alerts.forEach(a => {
+        msg += `- *ID:* \`${a.id}\`\n  العملة: ${a.instId}\n  الشرط: ${a.condition === '>' ? 'أعلى من' : 'أقل من'} ${a.price}\n\n`;
+    });
+    ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+bot.hears("🗑️ حذف تنبيه", (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    waitingForAlertDeletion = true; waitingForCapital = waitingForPrice = waitingForAlert = false;
+    ctx.reply("🗑️ أرسل `ID` التنبيه الذي تريد حذفه.");
+});
 
 // المعالج الرئيسي للرسائل النصية
 bot.on("message:text", async (ctx) => {
@@ -293,12 +276,53 @@ bot.on("message:text", async (ctx) => {
     const buttonCommands = ["📊 عرض المحفظة", "⚙️ تعيين رأس المال", "📈 سعر عملة", "🔔 ضبط تنبيه سعر", "📄 عرض التنبيهات", "🗑️ حذف تنبيه", "👁️ تشغيل مراقبة الصفقات", "🛑 إيقاف مراقبة الصفقات"];
     if (buttonCommands.includes(ctx.message.text)) return;
 
-    if (waitingForCapital) { /* ... الكود كما هو ... */ }
-    if (waitingForPrice) { /* ... الكود كما هو ... */ }
-    if (waitingForAlert) { /* ... الكود كما هو ... */ }
-    if (waitingForAlertDeletion) { /* ... الكود كما هو ... */ }
-});
+    if (waitingForCapital) {
+        const amount = parseFloat(ctx.message.text);
+        if (!isNaN(amount) && amount > 0) {
+            saveCapital(amount); await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
+        } else { await ctx.reply("❌ مبلغ غير صالح."); }
+        waitingForCapital = false; return;
+    }
 
+    if (waitingForPrice) {
+        const instId = ctx.message.text;
+        const { price, error } = await getTickerPrice(instId);
+        if (error) { await ctx.reply(`❌ ${error}`); }
+        else { await ctx.reply(`📈 *السعر الحالي لـ ${instId.toUpperCase()}:* \`$${price}\``, { parse_mode: "Markdown" }); }
+        waitingForPrice = false; return;
+    }
+
+    if (waitingForAlert) {
+        const [instId, condition, priceStr] = ctx.message.text.split(" ");
+        const price = parseFloat(priceStr);
+        if (!instId || !condition || !priceStr || !['>', '<'].includes(condition) || isNaN(price)) {
+            await ctx.reply("❌ صيغة غير صحيحة. يرجى استخدام الصيغة: `SYMBOL > PRICE`");
+        } else {
+            const alerts = loadAlerts();
+            const newAlert = {
+                id: crypto.randomUUID().split('-')[0], // ** هذا هو الإصلاح **
+                instId: instId.toUpperCase(), condition, price, active: true, createdAt: new Date().toISOString()
+            };
+            alerts.push(newAlert);
+            saveAlerts(alerts);
+            await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nسأقوم بإعلامك عندما يصبح سعر ${newAlert.instId} ${condition} ${newAlert.price}.`);
+        }
+        waitingForAlert = false; return;
+    }
+
+    if (waitingForAlertDeletion) {
+        const alertId = ctx.message.text.trim();
+        const alerts = loadAlerts();
+        const alertIndex = alerts.findIndex(a => a.id === alertId);
+        if (alertIndex === -1) { await ctx.reply("❌ لم يتم العثور على تنبيه بهذا الـ ID."); }
+        else {
+            alerts.splice(alertIndex, 1);
+            saveAlerts(alerts);
+            await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
+        }
+        waitingForAlertDeletion = false; return;
+    }
+});
 
 // إعداد الخادم والويب هوك
 app.use(express.json());
@@ -306,24 +330,18 @@ app.use(webhookCallback(bot, "express"));
 
 app.listen(PORT, async () => {
     console.log(`✅ Bot running on port ${PORT}`);
-    
-    // بدء تشغيل مراقبة التنبيهات (كل دقيقة)
     if (!alertsCheckInterval) {
         alertsCheckInterval = setInterval(checkAlerts, 60000);
         console.log("✅ Price alert checker started.");
     }
-
     try {
         const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
         if (domain) {
             const webhookUrl = `https://${domain}`;
             await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
             console.log(`✅ Webhook set to: ${webhookUrl}`);
-        } else {
-            console.warn("Webhook URL not found.");
-        }
-    } catch (e) {
-        console.error("Failed to set webhook:", e);
-    }
+        } else { console.warn("Webhook URL not found."); }
+    } catch (e) { console.error("Failed to set webhook:", e); }
 });
 
+                
