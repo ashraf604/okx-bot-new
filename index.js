@@ -1,7 +1,7 @@
-// OKX Portfolio Bot with PnL, Capital Setting, Egypt TZ, Live Trade Notifications
+// OKX Portfolio Bot with PnL, Alerts, Capital, Egypt TZ, Trade Notifications, Telegram Commands
 
 const express = require("express");
-const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
+const { Bot, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -13,8 +13,10 @@ const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 const CAPITAL_FILE = "capital.json";
-let lastTrades = {}; // لتتبع الصفقات وعدم التكرار
-let waitingForCapital = false; // لتفعيل انتظار رأس المال بعد الضغط على الزر
+const ALERTS_FILE = "alerts.json";
+let lastTrades = {};
+let monitoring = false;
+let waitingForCapital = false;
 
 function getEgyptTime() {
     return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
@@ -23,7 +25,6 @@ function getEgyptTime() {
 function saveCapital(amount) {
     fs.writeFileSync(CAPITAL_FILE, JSON.stringify({ capital: amount }));
 }
-
 function loadCapital() {
     try {
         const data = JSON.parse(fs.readFileSync(CAPITAL_FILE));
@@ -31,6 +32,17 @@ function loadCapital() {
     } catch {
         return 0;
     }
+}
+
+function loadAlerts() {
+    try {
+        return JSON.parse(fs.readFileSync(ALERTS_FILE));
+    } catch {
+        return [];
+    }
+}
+function saveAlerts(alerts) {
+    fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts));
 }
 
 function getHeaders(method, path, body = "") {
@@ -126,7 +138,7 @@ async function checkNewTrades() {
                 lastTrades[id] = true;
                 await bot.api.sendMessage(
                     AUTHORIZED_USER_ID,
-                    `🚨 *تم كشف صفقة جديدة: ${trade.instId}*\n🪙 الكمية: ${trade.pos}\n💰 القيمة: ${trade.notional}\n📈 الجانب: ${trade.posSide}`,
+                    `🚨 *صفقة جديدة: ${trade.instId}*\n🪙 كمية: ${trade.pos}\n💰 القيمة: ${trade.notional}\n📈 الجانب: ${trade.posSide}`,
                     { parse_mode: "Markdown" }
                 );
             }
@@ -136,30 +148,105 @@ async function checkNewTrades() {
     }
 }
 
+async function checkAlerts() {
+    const alerts = loadAlerts();
+    if (alerts.length === 0) return;
+
+    try {
+        for (let alert of alerts) {
+            const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${alert.symbol}-USDT`);
+            const json = await res.json();
+            const price = parseFloat(json.data[0].last);
+
+            if ((alert.type === "above" && price >= alert.price) ||
+                (alert.type === "below" && price <= alert.price)) {
+                await bot.api.sendMessage(AUTHORIZED_USER_ID,
+                    `🔔 *تنبيه سعر*\n${alert.symbol}-USDT وصل إلى $${price} (${alert.type} $${alert.price})`,
+                    { parse_mode: "Markdown" }
+                );
+                alerts.splice(alerts.indexOf(alert), 1);
+                saveAlerts(alerts);
+            }
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
 // الأوامر
 bot.command("start", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const keyboard = new InlineKeyboard()
-        .text("📊 عرض المحفظة", "refresh")
-        .text("⚙️ تعيين رأس المال", "setcapital")
-        .text("👁️ تشغيل مراقبة الصفقات", "monitor");
-
     await ctx.reply(
-        "🤖 *أهلاً بك في بوت مراقبة محفظة OKX*\n\n- اختر من الأزرار أدناه.",
-        { parse_mode: "Markdown", reply_markup: keyboard }
+        `🤖 *أهلاً بك في بوت مراقبة محفظة OKX*\n\n` +
+        `الأوامر المتاحة:\n` +
+        `/balance - عرض المحفظة\n` +
+        `/alert - إضافة تنبيه سعر\n` +
+        `/view_alerts - عرض التنبيهات\n` +
+        `/delete_alert - حذف تنبيه\n` +
+        `/monitor - بدء مراقبة الصفقات\n` +
+        `/stop_monitor - إيقاف المراقبة`,
+        { parse_mode: "Markdown" }
     );
 });
 
-bot.callbackQuery("setcapital", async ctx => {
+bot.command("balance", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.answerCallbackQuery();
-    waitingForCapital = true;
-    await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000");
+    const { assets, total } = await getPortfolio();
+    const capital = loadCapital();
+    const msg = formatPortfolioMsg(assets, total, capital);
+    await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
-// استقبال الرسائل العامة لتعيين رأس المال
+bot.command("alert", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    await ctx.reply("🔔 أرسل التنبيه بالصيغ:\nBTC above 30000\nأو\nETH below 2500");
+});
+
+bot.command("view_alerts", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    const alerts = loadAlerts();
+    if (alerts.length === 0) return ctx.reply("🚫 لا يوجد تنبيهات حالية.");
+    let msg = `📋 *قائمة التنبيهات:*\n`;
+    alerts.forEach((a, i) => {
+        msg += `${i + 1}. ${a.symbol} ${a.type} $${a.price}\n`;
+    });
+    await ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+bot.command("delete_alert", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    await ctx.reply("✏️ أرسل رقم التنبيه الذي تريد حذفه.");
+});
+
+bot.command("monitor", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    if (!monitoring) {
+        monitoring = setInterval(() => {
+            checkNewTrades();
+            checkAlerts();
+        }, 60000);
+        await ctx.reply("✅ تم تشغيل المراقبة التلقائية.");
+    } else {
+        await ctx.reply("✅ المراقبة تعمل بالفعل.");
+    }
+});
+
+bot.command("stop_monitor", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    if (monitoring) {
+        clearInterval(monitoring);
+        monitoring = false;
+        await ctx.reply("🛑 تم إيقاف المراقبة التلقائية.");
+    } else {
+        await ctx.reply("🛑 المراقبة غير مفعلة.");
+    }
+});
+
+// التقاط رسائل لتعيين رأس المال أو إضافة التنبيهات
 bot.on("message:text", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+
+    // تعيين رأس المال
     if (waitingForCapital) {
         const amount = parseFloat(ctx.message.text);
         if (!isNaN(amount) && amount > 0) {
@@ -167,26 +254,40 @@ bot.on("message:text", async ctx => {
             waitingForCapital = false;
             await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
         } else {
-            await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا مثل: 5000");
+            await ctx.reply("❌ المبلغ غير صالح، أرسل رقمًا مثل: 5000");
+        }
+        return;
+    }
+
+    // إضافة تنبيه
+    const parts = ctx.message.text.split(" ");
+    if (parts.length === 3) {
+        const symbol = parts[0].toUpperCase();
+        const type = parts[1].toLowerCase();
+        const price = parseFloat(parts[2]);
+        if ((type === "above" || type === "below") && !isNaN(price)) {
+            const alerts = loadAlerts();
+            alerts.push({ symbol, type, price });
+            saveAlerts(alerts);
+            await ctx.reply(`✅ تمت إضافة تنبيه: ${symbol} ${type} $${price}`);
+        }
+    }
+
+    // حذف تنبيه
+    if (!isNaN(ctx.message.text)) {
+        const idx = parseInt(ctx.message.text) - 1;
+        const alerts = loadAlerts();
+        if (alerts[idx]) {
+            alerts.splice(idx, 1);
+            saveAlerts(alerts);
+            await ctx.reply("✅ تم حذف التنبيه بنجاح.");
+        } else {
+            await ctx.reply("❌ رقم التنبيه غير صحيح.");
         }
     }
 });
 
-bot.callbackQuery("refresh", async ctx => {
-    await ctx.answerCallbackQuery();
-    const { assets, total } = await getPortfolio();
-    const capital = loadCapital();
-    const msg = formatPortfolioMsg(assets, total, capital);
-    await ctx.reply(msg, { parse_mode: "Markdown" });
-});
-
-bot.callbackQuery("monitor", async ctx => {
-    await ctx.answerCallbackQuery("✅ تم تشغيل مراقبة الصفقات تلقائيًا.");
-    if (!global.monitoring) {
-        global.monitoring = setInterval(checkNewTrades, 60000); // كل دقيقة
-    }
-});
-
+// تشغيل الخادم
 app.use(express.json());
 app.use(webhookCallback(bot, "express"));
 
