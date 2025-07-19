@@ -1,8 +1,8 @@
-// OKX Portfolio Bot FINAL CLEAN with /setcapital command
+// OKX Portfolio Bot FINAL CLEAN VERSION (with PnL, Egypt TZ, Capital Setting, Live Trade Notifications, InlineKeyboard)
 
 const express = require("express"); const { Bot, InlineKeyboard, webhookCallback } = require("grammy"); const fetch = require("node-fetch"); const crypto = require("crypto"); const fs = require("fs"); require("dotenv").config();
 
-const app = express(); const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const PORT = process.env.PORT || 3000; const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID); const API_BASE_URL = "https://www.okx.com"; const CAPITAL_FILE = "capital.json"; let lastTrades = {}; let waitingForCapital = false;
+const app = express(); const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const PORT = process.env.PORT || 3000; const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID); const API_BASE_URL = "https://www.okx.com"; const CAPITAL_FILE = "capital.json"; let lastTrades = {}; // prevent duplicate notifications let waitingForCapital = false; // for capital input
 
 function getEgyptTime() { return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }); }
 
@@ -40,12 +40,7 @@ const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=S
             const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
             const value = amount * price;
             if (value >= 1) {
-                assets.push({
-                    asset: asset.ccy,
-                    price,
-                    value,
-                    amount,
-                });
+                assets.push({ asset: asset.ccy, price, value, amount });
                 total += value;
             }
         }
@@ -100,32 +95,24 @@ json.data.forEach(async trade => {
 
 }
 
-// Commands bot.command("start", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const keyboard = new InlineKeyboard() .text("📊 عرض المحفظة", "refresh") .text("⚙️ تعيين رأس المال", "setcapital") .text("👁️ تشغيل المراقبة", "monitor");
+bot.command("start", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const keyboard = new InlineKeyboard() .text("📊 عرض المحفظة", "refresh") .text("⚙️ تعيين رأس المال", "setcapital") .text("👁️ تشغيل المراقبة", "monitor");
 
 await ctx.reply(
-    "🤖 *مرحبًا بك في بوت مراقبة محفظة OKX*\n\n- اختر من الأزرار أدناه.",
+    "🤖 *أهلاً بك في بوت مراقبة محفظة OKX*\n\n- اختر من الأزرار أدناه.",
     { parse_mode: "Markdown", reply_markup: keyboard }
 );
 
 });
 
-bot.command("setcapital", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; waitingForCapital = true; await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000"); });
+bot.callbackQuery("setcapital", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.answerCallbackQuery(); waitingForCapital = true; await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال (مثال: 5000)"); });
 
-bot.command("balance", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const { assets, total } = await getPortfolio(); const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); });
+bot.on("message:text", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (waitingForCapital) { const amount = parseFloat(ctx.message.text); if (!isNaN(amount) && amount > 0) { saveCapital(amount); waitingForCapital = false; await ctx.reply(✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}); } else { await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا صحيحًا."); } } });
 
-bot.command("monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (!global.monitoring) { global.monitoring = setInterval(checkNewTrades, 60000); await ctx.reply("✅ تم تشغيل مراقبة الصفقات تلقائيًا."); } else { await ctx.reply("⚠️ المراقبة تعمل بالفعل."); } });
+bot.callbackQuery("refresh", async ctx => { await ctx.answerCallbackQuery(); const { assets, total } = await getPortfolio(); const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); });
 
-bot.command("stop_monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (global.monitoring) { clearInterval(global.monitoring); global.monitoring = null; await ctx.reply("🛑 تم إيقاف مراقبة الصفقات."); } else { await ctx.reply("⚠️ المراقبة غير مفعلة."); } });
+bot.callbackQuery("monitor", async ctx => { await ctx.answerCallbackQuery("✅ تم تشغيل المراقبة التلقائية."); if (!global.monitoring) { global.monitoring = setInterval(checkNewTrades, 60000); } });
 
-bot.callbackQuery("setcapital", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.answerCallbackQuery(); waitingForCapital = true; await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000"); });
-
-bot.callbackQuery("refresh", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.answerCallbackQuery(); const { assets, total } = await getPortfolio(); const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); });
-
-bot.callbackQuery("monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.answerCallbackQuery("✅ تم تشغيل مراقبة الصفقات تلقائيًا."); if (!global.monitoring) { global.monitoring = setInterval(checkNewTrades, 60000); } });
-
-bot.on("message:text", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (waitingForCapital) { const amount = parseFloat(ctx.message.text); if (!isNaN(amount) && amount > 0) { saveCapital(amount); waitingForCapital = false; await ctx.reply(✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}); } else { await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا مثل: 5000"); } } });
-
-// Run app.use(express.json()); app.use(webhookCallback(bot, "express"));
+app.use(express.json()); app.use(webhookCallback(bot, "express"));
 
 app.listen(PORT, async () => { console.log(✅ Bot running on port ${PORT}); const domain = process.env.RAILWAY_STATIC_URL; if (domain) { await bot.api.setWebhook(https://${domain}/${bot.token}); console.log(✅ Webhook set to: https://${domain}/${bot.token}); } });
 
