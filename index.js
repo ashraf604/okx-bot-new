@@ -1,4 +1,4 @@
-// OKX Portfolio Bot (Final Stable with Auto Monitoring)
+// OKX Portfolio Bot (Stable - All Features - Egypt TZ - Capital Save - Safe Monitoring)
 const express = require("express");
 const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
@@ -13,12 +13,12 @@ const API_BASE_URL = "https://www.okx.com";
 const CAPITAL_FILE = "capital.json";
 const MONITOR_FILE = "monitor.json";
 
-// Egypt Timezone
+// Egypt Time
 function getEgyptTime() {
     return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
 }
 
-// Save & Load Capital
+// Capital save/load
 function saveCapital(amount) {
     fs.writeFileSync(CAPITAL_FILE, JSON.stringify({ capital: amount }));
 }
@@ -31,7 +31,7 @@ function loadCapital() {
     }
 }
 
-// Save & Load Monitor State
+// Monitor save/load
 function saveMonitorState(state) {
     fs.writeFileSync(MONITOR_FILE, JSON.stringify({ monitor: state }));
 }
@@ -61,7 +61,7 @@ function getHeaders(method, path, body = "") {
     };
 }
 
-// Get Portfolio Data
+// Get Portfolio
 async function getPortfolio() {
     try {
         const res = await fetch(`${API_BASE_URL}/api/v5/account/balance`, {
@@ -84,7 +84,7 @@ async function getPortfolio() {
                 const instId = `${asset.ccy}-USDT`;
                 const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
                 const value = amount * price;
-                if (value >= 1) { // filter < 1 USD
+                if (value >= 1) {
                     assets.push({
                         asset: asset.ccy,
                         price,
@@ -104,7 +104,7 @@ async function getPortfolio() {
     }
 }
 
-// Format Message
+// Format message
 function formatPortfolioMsg(assets, total, capital) {
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
@@ -126,7 +126,7 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// Monitor Job
+// Auto monitoring
 setInterval(async () => {
     if (loadMonitorState()) {
         const { assets, total } = await getPortfolio();
@@ -134,36 +134,22 @@ setInterval(async () => {
         const msg = formatPortfolioMsg(assets, total, capital);
         await bot.api.sendMessage(AUTHORIZED_USER_ID, msg, { parse_mode: "Markdown" });
     }
-}, 5 * 60 * 1000); // Every 5 minutes
+}, 5 * 60 * 1000);
 
 // Commands
 bot.command("start", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const keyboard = new InlineKeyboard()
         .text("📊 عرض المحفظة", "refresh")
+        .row()
         .text("✅ تشغيل المراقبة", "startmonitor")
         .text("⛔ إيقاف المراقبة", "stopmonitor")
+        .row()
         .text("⚙️ تعيين رأس المال", "setcapital");
     await ctx.reply("🤖 *أهلاً بك في بوت مراقبة محفظة OKX*\n\n- اختر من الأزرار أدناه:", {
         parse_mode: "Markdown",
         reply_markup: keyboard
     });
-});
-
-bot.command("setcapital", async ctx => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const parts = ctx.message.text.split(" ");
-    if (parts.length === 2) {
-        const amount = parseFloat(parts[1]);
-        if (!isNaN(amount) && amount > 0) {
-            saveCapital(amount);
-            await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
-        } else {
-            await ctx.reply("❌ المبلغ غير صالح.");
-        }
-    } else {
-        await ctx.reply("❌ استخدم الصيغة: /setcapital 5000");
-    }
 });
 
 bot.callbackQuery("refresh", async ctx => {
@@ -177,22 +163,45 @@ bot.callbackQuery("refresh", async ctx => {
 
 bot.callbackQuery("startmonitor", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    saveMonitorState(true);
-    await ctx.answerCallbackQuery();
-    await ctx.reply("✅ تم تشغيل المراقبة التلقائية (كل 5 دقائق).");
+    if (loadMonitorState()) {
+        await ctx.answerCallbackQuery({ text: "⚠️ المراقبة مفعلة بالفعل." });
+    } else {
+        saveMonitorState(true);
+        await ctx.answerCallbackQuery();
+        await ctx.reply("✅ تم تشغيل المراقبة التلقائية (كل 5 دقائق).");
+    }
 });
 
 bot.callbackQuery("stopmonitor", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    saveMonitorState(false);
-    await ctx.answerCallbackQuery();
-    await ctx.reply("⛔ تم إيقاف المراقبة التلقائية.");
+    if (!loadMonitorState()) {
+        await ctx.answerCallbackQuery({ text: "⚠️ المراقبة متوقفة بالفعل." });
+    } else {
+        saveMonitorState(false);
+        await ctx.answerCallbackQuery();
+        await ctx.reply("⛔ تم إيقاف المراقبة التلقائية.");
+    }
 });
 
-// Express and Webhook
+bot.callbackQuery("setcapital", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    await ctx.answerCallbackQuery();
+    await ctx.reply("✏️ أرسل الآن المبلغ المراد تعيينه كرأس مال مثل:\n5000");
+    bot.on("message:text", async msgCtx => {
+        if (msgCtx.from.id !== AUTHORIZED_USER_ID) return;
+        const amount = parseFloat(msgCtx.message.text);
+        if (!isNaN(amount) && amount > 0) {
+            saveCapital(amount);
+            await msgCtx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
+        } else {
+            await msgCtx.reply("❌ المبلغ غير صالح، حاول مرة أخرى.");
+        }
+    });
+});
+
+// Express
 app.use(express.json());
 app.use(webhookCallback(bot, "express"));
-
 app.listen(PORT, async () => {
     console.log(`✅ Bot running on port ${PORT}`);
     const domain = process.env.RAILWAY_STATIC_URL;
