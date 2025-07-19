@@ -14,6 +14,7 @@ const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 const CAPITAL_FILE = "capital.json";
 let lastTrades = {}; // لتتبع الصفقات وعدم التكرار
+let waitingForCapital = false; // لتفعيل انتظار رأس المال بعد الضغط على الزر
 
 function getEgyptTime() {
     return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
@@ -149,19 +150,25 @@ bot.command("start", async ctx => {
     );
 });
 
-bot.command("setcapital", async ctx => {
+bot.callbackQuery("setcapital", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const parts = ctx.message.text.split(" ");
-    if (parts.length === 2) {
-        const amount = parseFloat(parts[1]);
+    await ctx.answerCallbackQuery();
+    waitingForCapital = true;
+    await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000");
+});
+
+// استقبال الرسائل العامة لتعيين رأس المال
+bot.on("message:text", async ctx => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    if (waitingForCapital) {
+        const amount = parseFloat(ctx.message.text);
         if (!isNaN(amount) && amount > 0) {
             saveCapital(amount);
+            waitingForCapital = false;
             await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
         } else {
-            await ctx.reply("❌ المبلغ غير صالح.");
+            await ctx.reply("❌ المبلغ غير صالح. أرسل رقمًا مثل: 5000");
         }
-    } else {
-        await ctx.reply("❌ استخدم الصيغة: /setcapital 5000");
     }
 });
 
