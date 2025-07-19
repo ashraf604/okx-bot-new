@@ -1,7 +1,7 @@
 // OKX Portfolio Bot with PnL, Capital Setting, Egypt TZ, Live Trade Notifications
 
 const express = require("express");
-const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
+const { Bot, InlineKeyboard, InputFile, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -135,6 +135,7 @@ async function checkNewTrades() {
     }
 }
 
+// Start command
 bot.command("start", async ctx => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const keyboard = new InlineKeyboard()
@@ -148,28 +149,34 @@ bot.command("start", async ctx => {
     );
 });
 
-bot.command("setcapital", async ctx => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const parts = ctx.message.text.split(" ");
-    if (parts.length === 2) {
-        const amount = parseFloat(parts[1]);
+// Set capital handler
+bot.on("message:text", async ctx => {
+    if (ctx.session && ctx.session.waitingForCapital) {
+        const amount = parseFloat(ctx.message.text.trim());
         if (!isNaN(amount) && amount > 0) {
             saveCapital(amount);
             await ctx.reply(`✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}`);
         } else {
             await ctx.reply("❌ المبلغ غير صالح.");
         }
-    } else {
-        await ctx.reply("❌ استخدم الصيغة: /setcapital 5000");
+        ctx.session.waitingForCapital = false;
     }
 });
 
+// Handle inline keyboard for refresh and setcapital
 bot.callbackQuery("refresh", async ctx => {
     await ctx.answerCallbackQuery();
     const { assets, total } = await getPortfolio();
     const capital = loadCapital();
     const msg = formatPortfolioMsg(assets, total, capital);
     await ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+bot.callbackQuery("setcapital", async ctx => {
+    await ctx.answerCallbackQuery();
+    ctx.session = ctx.session || {};
+    ctx.session.waitingForCapital = true;
+    await ctx.reply("💼 أرسل المبلغ الآن لتعيين رأس المال بالدولار، مثال: 5000");
 });
 
 bot.callbackQuery("monitor", async ctx => {
@@ -179,6 +186,7 @@ bot.callbackQuery("monitor", async ctx => {
     }
 });
 
+// App and webhook initialization
 app.use(express.json());
 app.use(webhookCallback(bot, "express"));
 
