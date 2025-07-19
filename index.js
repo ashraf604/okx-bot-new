@@ -1,209 +1,197 @@
-// نفس المستوردات السابقة تماماً
 const express = require("express");
-const { Bot, InlineKeyboard, webhookCallback } = require("grammy");
+const { Bot, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 require("dotenv").config();
 
-const requiredEnv = ["TELEGRAM_BOT_TOKEN", "OKX_API_KEY", "OKX_API_SECRET_KEY", "OKX_API_PASSPHRASE", "AUTHORIZED_USER_ID"];
-for (const envVar of requiredEnv) {
-    if (!process.env[envVar]) console.error(`!!! متغير البيئة ${envVar} غير موجود.`);
-}
-
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 const API_BASE_URL = "https://www.okx.com";
-const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID, 10);
+const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID || "0");
 const PORT = process.env.PORT || 3000;
-
 const app = express();
-app.use(express.json());
 
-let isMonitoring = false;
-let monitoringInterval = null;
-let previousPortfolioState = [];
+let baseCapital = parseFloat(process.env.BASE_CAPITAL || "0"); // رأس المال الأساسي
+let previousPortfolio = [];
+let monitoring = false;
+let monitoringInterval;
 
+// توليد تواقيع OKX
 function getHeaders(method, path, body = "") {
-    const timestamp = new Date().toISOString();
-    const bodyString = typeof body === "object" ? JSON.stringify(body) : body;
-    const signString = timestamp + method.toUpperCase() + path + bodyString;
-    const signature = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(signString).digest("base64");
-    return {
-        "Content-Type": "application/json",
-        "OK-ACCESS-KEY": process.env.OKX_API_KEY,
-        "OK-ACCESS-SIGN": signature,
-        "OK-ACCESS-TIMESTAMP": timestamp,
-        "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE,
-    };
+  const timestamp = new Date().toISOString();
+  const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY)
+    .update(timestamp + method.toUpperCase() + path + body)
+    .digest("base64");
+  return {
+    "Content-Type": "application/json",
+    "OK-ACCESS-KEY": process.env.OKX_API_KEY,
+    "OK-ACCESS-SIGN": sign,
+    "OK-ACCESS-TIMESTAMP": timestamp,
+    "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE
+  };
 }
 
-async function getMarketTickers() {
-    try {
-        const res = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
-        const data = await res.json();
-        return data.code === "0" ? data.data : [];
-    } catch (e) {
-        console.error("Error fetching tickers:", e);
-        return [];
+// الحصول على بيانات المحفظة
+async function getPortfolio() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v5/account/balance`, {
+      headers: getHeaders("GET", "/api/v5/account/balance")
+    });
+    const data = await res.json();
+    if (data.code !== "0") return null;
+
+    const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+    const tickersData = await tickersRes.json();
+    const tickers = {};
+    if (tickersData.code === "0") {
+      tickersData.data.forEach(t => {
+        tickers[t.instId] = parseFloat(t.last);
+      });
     }
-}
 
-async function getPortfolioData() {
-    try {
-        const res = await fetch(`${API_BASE_URL}/api/v5/account/balance`, {
-            headers: getHeaders("GET", "/api/v5/account/balance"),
-        });
-        const data = await res.json();
-        if (data.code !== "0") return { assets: null, totalUsd: 0 };
-
-        const tickers = await getMarketTickers();
-        const prices = {};
-        tickers.forEach(t => prices[t.instId] = parseFloat(t.last));
-
-        const portfolio = [];
-        data.data[0].details.forEach(asset => {
-            const amount = parseFloat(asset.eq);
-            if (amount > 0) {
-                const instId = `${asset.ccy}-USDT`;
-                const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
-                const usdValue = amount * price;
-                if (usdValue >= 1) {
-                    portfolio.push({
-                        asset: asset.ccy,
-                        instId,
-                        amount,
-                        usdValue,
-                        price,
-                    });
-                }
-            }
-        });
-
-        const totalUsd = portfolio.reduce((sum, a) => sum + a.usdValue, 0);
-        portfolio.forEach(a => {
-            a.percentage = totalUsd > 0 ? ((a.usdValue / totalUsd) * 100) : 0;
-        });
-        portfolio.sort((a, b) => b.usdValue - a.usdValue);
-
-        return { assets: portfolio, totalUsd };
-    } catch (e) {
-        console.error("Error fetching portfolio:", e);
-        return { assets: null, totalUsd: 0 };
-    }
-}
-
-async function generatePortfolioMessage() {
-    const { assets, totalUsd } = await getPortfolioData();
-    if (!assets) return "❌ تعذر جلب بيانات المحفظة حالياً.";
-
-    let msg = `*📊 ملخص المحفظة 📊*\n\n`;
-    msg += `💰 *القيمة الحالية:* $${totalUsd.toFixed(2)}\n`;
-    msg += `------------------------------------\n`;
-
-    assets.forEach(a => {
-        msg += `💎 *${a.asset}*\n`;
-        if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
-        msg += `  القيمة: $${a.usdValue.toFixed(2)} (${a.percentage.toFixed(2)}%)\n`;
-        msg += `  الكمية: ${a.amount.toFixed(6)}\n\n`;
+    const portfolio = [];
+    let totalValue = 0;
+    data.data[0].details.forEach(asset => {
+      const amount = parseFloat(asset.eq);
+      if (amount <= 0) return;
+      const instId = `${asset.ccy}-USDT`;
+      const price = asset.ccy === "USDT" ? 1 : (tickers[instId] || 0);
+      const usdValue = amount * price;
+      if (usdValue < 0.5) return;
+      portfolio.push({ asset: asset.ccy, price, amount, usdValue });
+      totalValue += usdValue;
     });
 
-    msg += `_آخر تحديث: ${new Date().toLocaleString("ar-EG")}_`;
-
-    return msg;
+    portfolio.forEach(a => {
+      a.percentage = totalValue > 0 ? (a.usdValue / totalValue) * 100 : 0;
+    });
+    portfolio.sort((a, b) => b.usdValue - a.usdValue);
+    return { portfolio, totalValue };
+  } catch (e) {
+    console.error("Error fetching portfolio:", e);
+    return null;
+  }
 }
 
-function checkTrades(currentAssets, previousAssets) {
-    const notifications = [];
-    const prevMap = new Map(previousAssets.map(a => [a.asset, a]));
+// إرسال ملخص المحفظة
+async function sendPortfolio(ctx) {
+  const data = await getPortfolio();
+  if (!data) return ctx.reply("❌ تعذر جلب بيانات المحفظة.");
 
-    for (const curr of currentAssets) {
-        const prev = prevMap.get(curr.asset);
-        if (!prev) {
-            notifications.push(`🟢 *شراء جديد:* ${curr.amount.toFixed(4)} ${curr.asset}`);
+  const { portfolio, totalValue } = data;
+  const pnl = baseCapital ? ((totalValue - baseCapital) / baseCapital) * 100 : 0;
+
+  let msg = `📊 *ملخص المحفظة*\n\n`;
+  msg += `💰 *القيمة الحالية:* $${totalValue.toFixed(2)}\n`;
+  if (baseCapital) {
+    msg += `💼 *رأس المال الأساسي:* $${baseCapital.toFixed(2)}\n`;
+    msg += `📈 *PnL:* ${pnl >= 0 ? "🟢" : "🔴"} ${pnl.toFixed(2)}%\n`;
+  }
+  msg += `------------------------------------\n`;
+
+  portfolio.forEach(a => {
+    msg += `💎 *${a.asset}*\n`;
+    if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
+    msg += `  القيمة: $${a.usdValue.toFixed(2)} (${a.percentage.toFixed(2)}%)\n`;
+    msg += `  الكمية: ${a.amount.toFixed(6)}\n\n`;
+  });
+
+  msg += `_آخر تحديث: ${new Date().toLocaleString("ar-EG")}_`;
+  ctx.reply(msg, { parse_mode: "Markdown" });
+}
+
+// مقارنة الصفقات القديمة والجديدة
+function compareTrades(oldPortfolio, newPortfolio) {
+  const oldMap = new Map(oldPortfolio.map(a => [a.asset, a]));
+  const notifications = [];
+
+  for (const current of newPortfolio) {
+    const prev = oldMap.get(current.asset);
+    if (!prev) {
+      notifications.push(`🟢 *شراء جديد:* ${current.amount.toFixed(4)} ${current.asset}`);
+    } else {
+      const diff = current.amount - prev.amount;
+      if (Math.abs(diff * current.price) > 1) {
+        if (diff > 0) {
+          notifications.push(`🔵 *شراء إضافي:* ${diff.toFixed(4)} ${current.asset}`);
         } else {
-            const change = curr.amount - prev.amount;
-            if (Math.abs(change) * curr.price > 1) {
-                const action = change > 0 ? "🔵 شراء إضافي" : "🟠 بيع جزئي";
-                notifications.push(`${action}: ${Math.abs(change).toFixed(4)} ${curr.asset}`);
-            }
-            prevMap.delete(curr.asset);
+          notifications.push(`🟠 *بيع جزئي:* ${Math.abs(diff).toFixed(4)} ${current.asset}`);
         }
+      }
+      oldMap.delete(current.asset);
     }
-
-    for (const sold of prevMap.values()) {
-        notifications.push(`🔴 *بيع كامل:* ${sold.amount.toFixed(4)} ${sold.asset}`);
-    }
-
-    return notifications.length ? `*🔔 إشعار الصفقات 🔔*\n\n${notifications.join("\n")}` : null;
+  }
+  for (const prev of oldMap.values()) {
+    notifications.push(`🔴 *بيع كامل:* ${prev.amount.toFixed(4)} ${prev.asset}`);
+  }
+  return notifications;
 }
 
+// بدء المراقبة التلقائية
 async function startMonitoring(ctx) {
-    if (isMonitoring) return ctx.reply("⚠️ المراقبة مفعلة بالفعل.");
-    isMonitoring = true;
-    ctx.reply("✅ تم تشغيل مراقبة صفقاتك تلقائياً.\nسيتم إعلامك عند أي تغيير بالصفقات.");
+  if (monitoring) return ctx.reply("⚠️ المراقبة مفعلة بالفعل.");
+  monitoring = true;
+  ctx.reply("✅ تم تشغيل مراقبة الصفقات.");
 
-    const initial = await getPortfolioData();
-    if (!initial.assets) {
-        isMonitoring = false;
-        return ctx.reply("❌ تعذر بدء المراقبة.");
+  const initial = await getPortfolio();
+  if (!initial) {
+    monitoring = false;
+    return ctx.reply("❌ تعذر بدء المراقبة.");
+  }
+  previousPortfolio = initial.portfolio;
+
+  monitoringInterval = setInterval(async () => {
+    const current = await getPortfolio();
+    if (!current) return;
+    const changes = compareTrades(previousPortfolio, current.portfolio);
+    if (changes.length > 0) {
+      await bot.api.sendMessage(AUTHORIZED_USER_ID, `🔔 *حركة الصفقات:*\n\n${changes.join("\n")}`, { parse_mode: "Markdown" });
     }
-    previousPortfolioState = initial.assets;
-
-    // إرسال ملخص المحفظة عند تشغيل المراقبة
-    const portfolioMsg = await generatePortfolioMessage();
-    await ctx.reply(portfolioMsg, { parse_mode: "Markdown" });
-
-    monitoringInterval = setInterval(async () => {
-        const current = await getPortfolioData();
-        if (!current.assets) return;
-        const notification = checkTrades(current.assets, previousPortfolioState);
-        if (notification) {
-            await bot.api.sendMessage(AUTHORIZED_USER_ID, notification, { parse_mode: "Markdown" });
-            // إرسال ملخص المحفظة مباشرة بعد الإشعار
-            const updatedPortfolioMsg = await generatePortfolioMessage();
-            await bot.api.sendMessage(AUTHORIZED_USER_ID, updatedPortfolioMsg, { parse_mode: "Markdown" });
-        }
-        previousPortfolioState = current.assets;
-    }, 60000);
+    previousPortfolio = current.portfolio;
+  }, 60000); // كل دقيقة
 }
 
-async function stopMonitoring(ctx) {
-    if (!isMonitoring) return ctx.reply("ℹ️ المراقبة متوقفة بالفعل.");
-    clearInterval(monitoringInterval);
-    isMonitoring = false;
-    ctx.reply("🛑 تم إيقاف المراقبة.");
+// إيقاف المراقبة
+function stopMonitoring(ctx) {
+  if (!monitoring) return ctx.reply("ℹ️ المراقبة متوقفة بالفعل.");
+  clearInterval(monitoringInterval);
+  monitoring = false;
+  ctx.reply("🛑 تم إيقاف مراقبة الصفقات.");
 }
 
-// إعداد الأوامر والأزرار
-bot.command("start", ctx => {
-    const keyboard = new InlineKeyboard()
-        .text("📊 عرض المحفظة", "balance")
-        .text("🚦 بدء المراقبة", "monitor")
-        .text("🛑 إيقاف المراقبة", "stop");
-
-    ctx.reply("*🤖 مرحباً بك في بوت مراقبة محفظة OKX.*\nاختر من الأزرار:", {
-        parse_mode: "Markdown",
-        reply_markup: keyboard,
-    });
+// إعداد رأس المال عبر البوت
+bot.command("setcapital", async (ctx) => {
+  const parts = ctx.message.text.split(" ");
+  if (parts.length !== 2) return ctx.reply("⚠️ الاستخدام: /setcapital 5000");
+  const value = parseFloat(parts[1]);
+  if (isNaN(value) || value <= 0) return ctx.reply("⚠️ أدخل قيمة صحيحة أكبر من الصفر.");
+  baseCapital = value;
+  ctx.reply(`✅ تم تحديث رأس المال الأساسي إلى: $${baseCapital.toFixed(2)}`);
 });
 
-bot.on("callback_query:data", async ctx => {
-    const data = ctx.callbackQuery.data;
-    await ctx.answerCallbackQuery();
-    if (data === "balance") {
-        const msg = await generatePortfolioMessage();
-        await ctx.reply(msg, { parse_mode: "Markdown" });
-    }
-    if (data === "monitor") await startMonitoring(ctx);
-    if (data === "stop") await stopMonitoring(ctx);
+// الأوامر
+bot.command("start", (ctx) => ctx.reply("🤖 أهلاً بك في بوت مراقبة محفظة OKX.\n\n- /portfolio لعرض المحفظة.\n- /startmonitor لتفعيل المراقبة.\n- /stopmonitor لإيقاف المراقبة.\n- /setcapital 5000 لتحديد رأس المال لحساب PnL."));
+bot.command("portfolio", sendPortfolio);
+bot.command("startmonitor", startMonitoring);
+bot.command("stopmonitor", stopMonitoring);
+
+bot.use(async (ctx, next) => {
+  if (ctx.from?.id !== AUTHORIZED_USER_ID) return;
+  await next();
 });
 
-bot.command("balance", async ctx => {
-    const msg = await generatePortfolioMessage();
-    await ctx.reply(msg, { parse_mode: "Markdown" });
-});
-bot.command("monitor", startMonitoring);
-bot.command("stop", stopMonitoring);
-
-bot.catch(err => console.error(err));
+// التشغيل
+app.use(express.json());
 app.use(webhookCallback(bot, "express"));
-app.listen(PORT, () => console.log(`🚀 Bot server running on ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`🚀 Bot running on port ${PORT}`);
+  const domain = process.env.RAILWAY_STATIC_URL;
+  if (domain) {
+    const webhookUrl = `https://${domain}/${bot.token}`;
+    try {
+      await bot.api.setWebhook(webhookUrl);
+      console.log(`✅ Webhook set to: ${webhookUrl}`);
+    } catch (e) {
+      console.error("❌ Failed to set webhook:", e);
+    }
+  }
+});
