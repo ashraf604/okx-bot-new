@@ -1,8 +1,8 @@
-// ✅ OKX Portfolio Bot FINAL CLEAN VERSION // Features: PnL, Capital Setting, Egypt TZ, Trade Notifications, BotFather-compatible buttons
+// OKX Portfolio Bot FINAL FIXED VERSION // Features: PnL, Capital Setting, Egypt TZ, Live Trade Alerts, BotFather Compatibility
 
-const express = require("express"); const { Bot, webhookCallback } = require("grammy"); const fetch = require("node-fetch"); const crypto = require("crypto"); const fs = require("fs"); require("dotenv").config();
+const express = require("express"); const { Bot, InlineKeyboard } = require("grammy"); const fetch = require("node-fetch"); const crypto = require("crypto"); const fs = require("fs"); require("dotenv").config();
 
-const app = express(); const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const PORT = process.env.PORT || 3000; const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID); const API_BASE_URL = "https://www.okx.com"; const CAPITAL_FILE = "capital.json"; let monitoring = false; let lastTrades = {};
+const app = express(); const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN); const PORT = process.env.PORT || 3000; const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID); const API_BASE_URL = "https://www.okx.com"; const CAPITAL_FILE = "capital.json"; let lastTrades = {};
 
 function getEgyptTime() { return new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" }); }
 
@@ -51,7 +51,26 @@ const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=S
 
 }
 
-function formatPortfolioMsg(assets, total, capital) { let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let msg = "📊 ملخص المحفظة 📊\n\n"; msg += 💰 *القيمة الحالية:* $${total.toFixed(2)}\n; msg += 💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n; msg += 📈 *PnL:* ${pnl >= 0 ? '🟢' : '🔴'} ${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n; msg += ------------------------------------\n; assets.forEach(a => { let percent = ((a.value / total) * 100).toFixed(2); msg += 💎 *${a.asset}* (${percent}%)\n; if (a.asset !== "USDT") msg +=   السعر: $${a.price.toFixed(4)}\n; msg +=   القيمة: $${a.value.toFixed(2)}\n; msg +=   الكمية: ${a.amount}\n\n; }); msg += 🕒 *آخر تحديث:* ${getEgyptTime()}; return msg; }
+function formatPortfolioMsg(assets, total, capital) { let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+
+let msg = `📊 *ملخص المحفظة* 📊\n\n`;
+msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
+msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
+msg += `📈 *PnL:* ${pnl >= 0 ? '🟢' : '🔴'} ${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
+msg += `------------------------------------\n`;
+
+assets.forEach(a => {
+    let percent = ((a.value / total) * 100).toFixed(2);
+    msg += `💎 *${a.asset}* (${percent}%)\n`;
+    if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
+    msg += `  القيمة: $${a.value.toFixed(2)}\n`;
+    msg += `  الكمية: ${a.amount}\n\n`;
+});
+
+msg += `🕒 *آخر تحديث:* ${getEgyptTime()}`;
+return msg;
+
+}
 
 async function checkNewTrades() { try { const res = await fetch(${API_BASE_URL}/api/v5/account/positions, { headers: getHeaders("GET", "/api/v5/account/positions") }); const json = await res.json();
 
@@ -68,17 +87,17 @@ json.data.forEach(async trade => {
 
 }
 
-bot.command("start", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.reply("🤖 أهلاً بك في بوت مراقبة محفظة OKX\n\n- أرسل /balance لعرض الرصيد\n- أرسل المبلغ مباشرة لتعيين رأس المال\n- أرسل /monitor لبدء المراقبة\n- أرسل /stop_monitor لإيقاف المراقبة", { parse_mode: "Markdown" }); });
+bot.command("start", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; await ctx.reply("🤖 أهلاً بك في بوت مراقبة محفظة OKX\n\n- استخدم الأوامر التالية:\n/start - بدء البوت\n/balance - عرض المحفظة\n/monitor - تشغيل مراقبة الصفقات\n/stop_monitor - إيقاف المراقبة\n/alert - إضافة تنبيه سعر\n/view_alerts - عرض التنبيهات\n/delete_alert - حذف تنبيه\n\n💼 لإضافة رأس المال أرسل المبلغ مباشرة، مثال: 5000", { parse_mode: "Markdown" }); });
 
 bot.command("balance", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const { assets, total } = await getPortfolio(); const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); });
 
-bot.command("monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (!monitoring) { monitoring = setInterval(checkNewTrades, 60000); await ctx.reply("✅ تم بدء مراقبة الصفقات الحية."); } else { await ctx.reply("⚠️ المراقبة تعمل بالفعل."); } });
+bot.command("monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (!global.monitoring) { global.monitoring = setInterval(checkNewTrades, 60000); await ctx.reply("✅ تم تشغيل مراقبة الصفقات."); } else { await ctx.reply("🚨 المراقبة تعمل بالفعل."); } });
 
-bot.command("stop_monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (monitoring) { clearInterval(monitoring); monitoring = false; await ctx.reply("🛑 تم إيقاف مراقبة الصفقات الحية."); } else { await ctx.reply("⚠️ المراقبة ليست نشطة حالياً."); } });
+bot.command("stop_monitor", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; if (global.monitoring) { clearInterval(global.monitoring); global.monitoring = null; await ctx.reply("🛑 تم إيقاف مراقبة الصفقات."); } else { await ctx.reply("ℹ️ المراقبة متوقفة بالفعل."); } });
 
 bot.on("message:text", async ctx => { if (ctx.from.id !== AUTHORIZED_USER_ID) return; const amount = parseFloat(ctx.message.text); if (!isNaN(amount) && amount > 0) { saveCapital(amount); await ctx.reply(✅ تم تعيين رأس المال إلى: $${amount.toFixed(2)}); } });
 
-app.use(express.json()); app.use(webhookCallback(bot, "express"));
+app.use(express.json()); app.post(/${bot.token}, (req, res) => bot.handleUpdate(req.body, res));
 
 app.listen(PORT, async () => { console.log(✅ Bot running on port ${PORT}); const domain = process.env.RAILWAY_STATIC_URL; if (domain) { await bot.api.setWebhook(https://${domain}/${bot.token}); console.log(✅ Webhook set to: https://${domain}/${bot.token}); } });
 
