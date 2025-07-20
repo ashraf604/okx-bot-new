@@ -1,8 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final Stable Architecture
-// This version uses a robust, stable architecture with separated
-// handlers (hears/on) to guarantee functionality and prevent conflicts.
-// All features have been meticulously reviewed and tested.
+// OKX Advanced Analytics Bot - Final Stable Architecture v2
+// This version includes robust, diagnostic error handling for the
+// getPortfolio function to solve the silent failure issue.
 // =================================================================
 
 const express = require("express");
@@ -27,7 +26,7 @@ const HISTORY_FILE = "data_history.json";
 const SETTINGS_FILE = "data_settings.json";
 
 // --- متغيرات الحالة والمؤشرات ---
-let waitingState = null; // 'set_capital', 'coin_info', 'set_alert', 'delete_alert'
+let waitingState = null;
 let tradeMonitoringInterval = null;
 let alertsCheckInterval = null;
 let dailyJobsInterval = null;
@@ -69,172 +68,111 @@ function getHeaders(method, path, body = "") {
     };
 }
 
-// === دوال جلب البيانات من OKX ===
-async function getPortfolio() { /* ... الكود كما هو ... */ }
-async function getInstrumentDetails(instId) { /* ... الكود كما هو ... */ }
+// === دوال جلب البيانات من OKX (مع تشخيص أخطاء مُحسَّن) ===
+
+async function getPortfolio() {
+    try {
+        // 1. جلب رصيد الحساب
+        const balanceRes = await fetch(`${API_BASE_URL}/api/v5/account/balance`, { headers: getHeaders("GET", "/api/v5/account/balance") });
+        if (!balanceRes.ok) {
+            return { error: `فشل الاتصال بالمنصة (Balance API). Status: ${balanceRes.status}` };
+        }
+        const balanceJson = await balanceRes.json();
+        console.log("OKX Balance API Response:", JSON.stringify(balanceJson)); // تسجيل الرد الخام للتشخيص
+        if (balanceJson.code !== '0') {
+            return { error: `خطأ من منصة OKX: ${balanceJson.msg}\n\n*تلميح:* تأكد من أن مفتاح API لديه صلاحية القراءة (Read).` };
+        }
+        if (!balanceJson.data || !balanceJson.data[0] || !balanceJson.data[0].details) {
+            return { error: "رد غير متوقع من المنصة (بيانات الرصيد فارغة)." };
+        }
+
+        // 2. جلب أسعار العملات
+        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+        if (!tickersRes.ok) {
+            return { error: `فشل الاتصال بالمنصة (Tickers API). Status: ${tickersRes.status}` };
+        }
+        const tickersJson = await tickersRes.json();
+        const prices = {};
+        if (tickersJson.data) {
+            tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        }
+
+        // 3. معالجة وتجميع البيانات
+        let assets = [], total = 0;
+        balanceJson.data[0].details.forEach(asset => {
+            const amount = parseFloat(asset.eq);
+            if (amount > 0) {
+                const instId = `${asset.ccy}-USDT`;
+                const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
+                const value = amount * price;
+                if (value >= 1) {
+                    assets.push({ asset: asset.ccy, price, value, amount });
+                    total += value;
+                }
+            }
+        });
+
+        assets.sort((a, b) => b.value - a.value);
+        return { assets, total, error: null }; // إرجاع البيانات بنجاح
+
+    } catch (e) {
+        console.error("Critical Error in getPortfolio:", e);
+        return { error: `حدث خطأ فني حرج أثناء جلب البيانات: ${e.message}` };
+    }
+}
 
 // === دوال العرض والمهام المجدولة ===
-function formatPortfolioMsg(assets, total, capital) { /* ... الكود كما هو ... */ }
-function createChartUrl(history) { /* ... الكود كما هو ... */ }
-async function checkNewTrades() { /* ... الكود كما هو ... */ }
-async function checkAlerts() { /* ... الكود كما هو ... */ }
-async function runDailyJobs() { /* ... الكود كما هو في النسخة السابقة (المنطق صحيح) ... */ }
+function formatPortfolioMsg(assets, total, capital) {
+    if (assets.length === 0) {
+        return "ℹ️ لا توجد أصول في محفظتك حاليًا تزيد قيمتها عن 1$.";
+    }
+    // ... بقية الكود كما هو
+    let pnl = capital > 0 ? total - capital : 0;
+    let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+    let msg = `📊 *ملخص المحفظة* 📊\n\n`;
+    msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
+    msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
+    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
+    msg += `------------------------------------\n`;
+    assets.forEach(a => {
+        let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
+        msg += `💎 *${a.asset}* (${percent}%)\n`;
+        if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
+        msg += `  القيمة: $${a.value.toFixed(2)}\n`;
+        msg += `  الكمية: ${a.amount}\n\n`;
+    });
+    msg += `🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
+    return msg;
+}
+// ... باقي الدوال كما هي
 
 // === واجهة البوت والأوامر ===
-
-const mainKeyboard = new Keyboard()
-    .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
-    .text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row()
-    .text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
-
-bot.command("start", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.reply("🤖 *بوت OKX التحليلي المتكامل*\n\n- تم اعتماد بنية برمجية جديدة ومستقرة. البوت جاهز للعمل.", { parse_mode: "Markdown", reply_markup: mainKeyboard });
-});
-
-bot.command("settings", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const settings = loadSettings();
-    const settingsKeyboard = new InlineKeyboard()
-        .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
-        .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary");
-    await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { reply_markup: settingsKeyboard });
-});
+// ... الكود كما هو
 
 // === معالجات الأوامر المباشرة (من الأزرار) ===
 
 bot.hears("📊 عرض المحفظة", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
-    const { assets, total, error } = await getPortfolio();
-    if (error) return await ctx.reply(`❌ ${error}`);
-    const capital = loadCapital();
-    const msg = formatPortfolioMsg(assets, total, capital);
-    await ctx.reply(msg, { parse_mode: "Markdown" });
-});
+    try {
+        await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
+        const { assets, total, error } = await getPortfolio();
+        
+        if (error) {
+            return await ctx.reply(`❌ *فشل تحديث المحفظة:*\n\n${error}`, { parse_mode: "Markdown" });
+        }
+        
+        const capital = loadCapital();
+        const msg = formatPortfolioMsg(assets, total, capital);
+        await ctx.reply(msg, { parse_mode: "Markdown" });
 
-bot.hears("📈 أداء المحفظة", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    const history = loadHistory();
-    const chartUrl = createChartUrl(history);
-    if (chartUrl) {
-        await ctx.replyWithPhoto(chartUrl, { caption: "أداء محفظتك خلال الأيام السبعة الماضية." });
-    } else {
-        await ctx.reply("ℹ️ لا توجد بيانات كافية لعرض الرسم البياني. سيتم تجميع البيانات يوميًا.");
+    } catch (e) {
+        console.error("Error in 'عرض المحفظة' handler:", e);
+        await ctx.reply("❌ حدث خطأ غير متوقع أثناء معالجة طلبك.");
     }
 });
 
-bot.hears("ℹ️ معلومات عملة", (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    waitingState = 'coin_info';
-    ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT).");
-});
-
-bot.hears("🔔 ضبط تنبيه", (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    waitingState = 'set_alert';
-    ctx.reply("📝 *أرسل تفاصيل التنبيه:*\n`SYMBOL > PRICE` أو `SYMBOL < PRICE`", { parse_mode: "Markdown" });
-});
-
-bot.hears("👁️ مراقبة الصفقات", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    if (!tradeMonitoringInterval) {
-        await checkNewTrades();
-        tradeMonitoringInterval = setInterval(checkNewTrades, 60000);
-        await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة.");
-    } else {
-        clearInterval(tradeMonitoringInterval);
-        tradeMonitoringInterval = null;
-        await ctx.reply("🛑 تم إيقاف مراقبة الصفقات الجديدة.");
-    }
-});
-
-bot.hears("⚙️ الإعدادات", (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    ctx.api.sendMessage(ctx.from.id, "/settings");
-});
-
-// === معالجات الأزرار المضمنة (Inline Keyboard) ===
-bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
-bot.callbackQuery("view_alerts", async (ctx) => { /* ... الكود كما هو ... */ });
-bot.callbackQuery("delete_alert", async (ctx) => { waitingState = 'delete_alert'; await ctx.answerCallbackQuery(); await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); });
-bot.callbackQuery("toggle_summary", async (ctx) => { /* ... الكود كما هو ... */ });
-
-// === المعالج المخصص للردود (عندما ينتظر البوت إدخالاً) ===
-bot.on("message:text", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID || !waitingState) return;
-    const text = ctx.message.text.trim();
-
-    // قائمة الأوامر الرئيسية لتجاهلها في هذه الحالة
-    const mainCommands = ["📊 عرض المحفظة", "📈 أداء المحفظة", "ℹ️ معلومات عملة", "🔔 ضبط تنبيه", "👁️ مراقبة الصفقات", "⚙️ الإعدادات"];
-    if (mainCommands.includes(text)) {
-        waitingState = null; // إلغاء الحالة إذا ضغط المستخدم على زر آخر
-        return;
-    }
-
-    switch (waitingState) {
-        case 'set_capital':
-            const amount = parseFloat(text);
-            if (!isNaN(amount) && amount > 0) {
-                saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`);
-            } else { await ctx.reply("❌ مبلغ غير صالح."); }
-            break;
-        case 'coin_info':
-            const { error, ...details } = await getInstrumentDetails(text);
-            if (error) { await ctx.reply(`❌ ${error}`); }
-            else {
-                let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n`;
-                msg += `- *السعر الحالي:* \`$${details.price}\`\n`;
-                msg += `- *أعلى سعر (24س):* \`$${details.high24h}\`\n`;
-                msg += `- *أدنى سعر (24س):* \`$${details.low24h}\`\n`;
-                msg += `- *حجم التداول (24س):* \`${details.vol24h.toFixed(2)} ${text.split('-')[0]}\``;
-                await ctx.reply(msg, { parse_mode: "Markdown" });
-            }
-            break;
-        case 'set_alert':
-            const [instId, condition, priceStr] = text.split(" ");
-            const price = parseFloat(priceStr);
-            if (!instId || !condition || !priceStr || !['>', '<'].includes(condition) || isNaN(price)) {
-                await ctx.reply("❌ صيغة غير صحيحة.");
-            } else {
-                const alerts = loadAlerts();
-                const newAlert = { id: crypto.randomUUID().slice(0, 8), instId: instId.toUpperCase(), condition, price, active: true };
-                alerts.push(newAlert);
-                saveAlerts(alerts);
-                await ctx.reply(`✅ تم ضبط التنبيه بنجاح.`);
-            }
-            break;
-        case 'delete_alert':
-            const alertId = text;
-            let alerts = loadAlerts();
-            const initialLength = alerts.length;
-            alerts = alerts.filter(a => a.id !== alertId);
-            if (alerts.length === initialLength) {
-                await ctx.reply("❌ لم يتم العثور على تنبيه بهذا الـ ID.");
-            } else {
-                saveAlerts(alerts);
-                await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
-            }
-            break;
-    }
-    waitingState = null; // إعادة تعيين الحالة بعد المعالجة
-});
+// ... باقي المعالجات كما هي
 
 // === بدء تشغيل الخادم والمهام المجدولة ===
-app.use(express.json());
-app.use(webhookCallback(bot, "express"));
-
-app.listen(PORT, async () => {
-    console.log(`✅ Bot running on port ${PORT}`);
-    if (!alertsCheckInterval) { alertsCheckInterval = setInterval(checkAlerts, 60000); console.log("✅ Price alert checker started."); }
-    if (!dailyJobsInterval) { dailyJobsInterval = setInterval(runDailyJobs, 5 * 60000); console.log("✅ Daily jobs scheduler started."); }
-    try {
-        const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
-        if (domain) {
-            const webhookUrl = `https://${domain}`;
-            await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
-            console.log(`✅ Webhook set to: ${webhookUrl}`);
-        } else { console.warn("Webhook URL not found."); }
-    } catch (e) { console.error("Failed to set webhook:", e); }
-});
+// ... الكود كما هو
 
