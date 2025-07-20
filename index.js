@@ -299,4 +299,3 @@ app.listen(PORT, async () => {
         } else { console.warn("Webhook URL not found."); }
     } catch (e) { console.error("Failed to set webhook:", e); }
 });
-
