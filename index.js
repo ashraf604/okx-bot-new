@@ -156,17 +156,40 @@ async function checkNewTrades() {
         let newTradesFound = false;
 
         for (const trade of json.data.reverse()) {
+            // ============ START: BLOCK REPLACED ============
             if (!lastTrades[trade.ordId]) {
-                const side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
                 const instId = trade.instId;
-                const avgPx = parseFloat(trade.avgPx).toFixed(5);
+                const ccy = instId.split('-')[0]; // للحصول على العملة الأساسية (مثل DORA)
+                let side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
+                const avgPx = parseFloat(trade.avgPx);
                 const sz = parseFloat(trade.sz);
                 const fee = parseFloat(trade.fee);
 
+                // --- هذا هو المنطق الجديد ---
+                if (trade.side === 'sell') {
+                    // بعد عملية البيع، تحقق من الرصيد المتبقي
+                    const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
+                    const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
+                    const balanceJson = await balanceRes.json();
+
+                    let currentBalance = 0;
+                    if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
+                        currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
+                    }
+
+                    // إذا كان الرصيد المتبقي صغيرًا جدًا (غبار)، اعتبره بيعًا كليًا
+                    if (currentBalance < 0.0001) {
+                        side = 'بيع كلي 🔴';
+                    } else {
+                        side = 'بيع جزئي 🔴';
+                    }
+                }
+                // --- نهاية المنطق الجديد ---
+
                 let message = `🔔 *صفقة جديدة!* 🔔\n\n`;
-                message += `*${side}* - *${instId}*\n\n`;
+                message += `*${side}* - *${instId}*\n\n`; // متغير `side` الآن محدث
                 message += `- *الكمية:* ${sz}\n`;
-                message += `- *متوسط السعر:* $${avgPx}\n`;
+                message += `- *متوسط السعر:* $${avgPx.toFixed(5)}\n`;
                 message += `- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n`;
                 message += `- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
                 if (parseFloat(trade.pnl) !== 0) {
@@ -177,6 +200,7 @@ async function checkNewTrades() {
                 lastTrades[trade.ordId] = true;
                 newTradesFound = true;
             }
+             // ============ END: BLOCK REPLACED ============
         }
 
         if (newTradesFound) {
@@ -187,6 +211,7 @@ async function checkNewTrades() {
         console.error("Error in checkNewTrades:", error);
     }
 }
+
 
 async function checkAlerts() {
     const alerts = loadAlerts();
@@ -432,6 +457,7 @@ app.listen(PORT, async () => {
             const webhookUrl = `https://${domain}`;
             await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
             console.log(`✅ Webhook set to: ${webhookUrl}`);
-        } else { console.warn("Webhook URL not found. Bot will run on polling."); }
-    } catch (e) { console.error("Failed to set webhook:", e); }
+        } else { console.warn("Webhook URL not set. Bot will run in polling mode locally."); }
+    } catch (e) { console.error("Error setting webhook:", e); }
 });
+
