@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final, Reviewed, & Fully Functional
+// OKX Advanced Analytics Bot - Final, Meticulously Reviewed Version
 // =================================================================
 
 const express = require("express");
@@ -24,7 +24,7 @@ const HISTORY_FILE = "data_history.json";
 const SETTINGS_FILE = "data_settings.json";
 
 // --- متغيرات الحالة والمؤشرات ---
-let waitingState = null; // 'set_capital', 'coin_info', 'set_alert', 'delete_alert', 'confirm_delete_all'
+let waitingState = null;
 let tradeMonitoringInterval = null;
 let alertsCheckInterval = null;
 let dailyJobsInterval = null;
@@ -55,6 +55,8 @@ const saveHistory = (history) => writeJsonFile(HISTORY_FILE, history);
 const loadSettings = () => readJsonFile(SETTINGS_FILE, { dailySummary: false });
 const saveSettings = (settings) => writeJsonFile(SETTINGS_FILE, settings);
 
+// === دوال API ===
+
 function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
     const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body);
@@ -65,8 +67,6 @@ function getHeaders(method, path, body = "") {
         "Content-Type": "application/json",
     };
 }
-
-// === دوال جلب البيانات من OKX ===
 
 async function getPortfolio() {
     try {
@@ -142,8 +142,98 @@ function createChartUrl(history) {
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
 }
 
-async function checkNewTrades() { /* لم يتم تفعيل هذه الميزة بعد */ }
-async function checkAlerts() { /* لم يتم تفعيل هذه الميزة بعد */ }
+async function checkNewTrades() {
+    try {
+        const path = "/api/v5/trade/orders-history?instType=SPOT&state=filled";
+        const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
+        const json = await res.json();
+
+        if (json.code !== '0' || !json.data) {
+            return console.error("Failed to fetch trade history:", json.msg);
+        }
+
+        const lastTrades = loadLastTrades();
+        let newTradesFound = false;
+
+        for (const trade of json.data.reverse()) {
+            if (!lastTrades[trade.ordId]) {
+                const side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
+                const instId = trade.instId;
+                const avgPx = parseFloat(trade.avgPx).toFixed(5);
+                const sz = parseFloat(trade.sz);
+                const fee = parseFloat(trade.fee);
+
+                let message = `🔔 *صفقة جديدة!* 🔔\n\n`;
+                message += `*${side}* - *${instId}*\n\n`;
+                message += `- *الكمية:* ${sz}\n`;
+                message += `- *متوسط السعر:* $${avgPx}\n`;
+                message += `- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n`;
+                message += `- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
+                if (parseFloat(trade.pnl) !== 0) {
+                    message += `- *الربح/الخسارة المحقق:* $${parseFloat(trade.pnl).toFixed(2)}\n`;
+                }
+
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
+                lastTrades[trade.ordId] = true;
+                newTradesFound = true;
+            }
+        }
+
+        if (newTradesFound) {
+            saveLastTrades(lastTrades);
+        }
+
+    } catch (error) {
+        console.error("Error in checkNewTrades:", error);
+    }
+}
+
+async function checkAlerts() {
+    const alerts = loadAlerts();
+    if (alerts.length === 0) return;
+
+    try {
+        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+        const tickersJson = await tickersRes.json();
+        if (tickersJson.code !== '0') {
+            return console.error("Failed to fetch tickers for alerts:", tickersJson.msg);
+        }
+
+        const prices = {};
+        tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+
+        const remainingAlerts = [];
+        let alertsTriggered = false;
+
+        for (const alert of alerts) {
+            if (!alert.active || !prices[alert.instId]) {
+                remainingAlerts.push(alert);
+                continue;
+            }
+
+            const currentPrice = prices[alert.instId];
+            let triggered = false;
+
+            if (alert.condition === '>' && currentPrice > alert.price) triggered = true;
+            else if (alert.condition === '<' && currentPrice < alert.price) triggered = true;
+
+            if (triggered) {
+                const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`;
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
+                alertsTriggered = true;
+            } else {
+                remainingAlerts.push(alert);
+            }
+        }
+
+        if (alertsTriggered) {
+            saveAlerts(remainingAlerts);
+        }
+
+    } catch (error) {
+        console.error("Error in checkAlerts:", error);
+    }
+}
 
 async function runDailyJobs() {
     const settings = loadSettings();
@@ -186,7 +276,7 @@ bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; 
 
 bot.callbackQuery("view_alerts", async (ctx) => {
     await ctx.answerCallbackQuery();
-    const alerts = loadAlerts().filter(a => a.active);
+    const alerts = loadAlerts();
     if (alerts.length === 0) return ctx.reply("ℹ️ لا توجد تنبيهات نشطة حاليًا.");
     let msg = "🔔 *قائمة التنبيهات النشطة:*\n\n";
     alerts.forEach(a => { msg += `- *ID:* \`${a.id}\`\n  العملة: ${a.instId}\n  الشرط: ${a.condition === '>' ? 'أعلى من' : 'أقل من'} ${a.price}\n\n`; });
@@ -211,11 +301,7 @@ bot.callbackQuery("delete_all_data", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply("⚠️ هل أنت متأكد من حذف كل البيانات؟ هذا الإجراء لا يمكن التراجع عنه.\n\nأرسل كلمة `تأكيد` خلال 30 ثانية.", { parse_mode: "Markdown" });
     waitingState = 'confirm_delete_all';
-    setTimeout(() => {
-        if (waitingState === 'confirm_delete_all') {
-            waitingState = null;
-        }
-    }, 30000);
+    setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000);
 });
 
 // === المعالج الشامل للرسائل النصية ===
@@ -223,6 +309,7 @@ bot.on("message:text", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const text = ctx.message.text.trim();
 
+    // --- 1. التعامل مع الأوامر المباشرة (أزرار الواجهة الرئيسية) ---
     switch (text) {
         case "📊 عرض المحفظة":
             await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
@@ -234,19 +321,14 @@ bot.on("message:text", async (ctx) => {
 
         case "📈 أداء المحفظة":
             const history = loadHistory();
-            if (history.length < 2) {
-                return await ctx.reply("ℹ️ لا توجد بيانات كافية لعرض الرسم البياني. يرجى تفعيل الملخص اليومي والانتظار ليوم واحد على الأقل.");
-            }
+            if (history.length < 2) return await ctx.reply("ℹ️ لا توجد بيانات كافية. يرجى تفعيل الملخص اليومي والانتظار.");
             const chartUrl = createChartUrl(history);
             const latest = history[history.length - 1]?.total || 0;
             const previous = history[history.length - 2]?.total || 0;
             const diff = latest - previous;
             const percent = previous > 0 ? (diff / previous) * 100 : 0;
             const summary = `*تغير آخر يوم:*\n${diff >= 0 ? '🟢' : '🔴'} $${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
-            return await ctx.replyWithPhoto(chartUrl, {
-                caption: `أداء محفظتك خلال الأيام السبعة الماضية.\n\n${summary}`,
-                parse_mode: "Markdown"
-            });
+            return await ctx.replyWithPhoto(chartUrl, { caption: `أداء محفظتك خلال الأيام السبعة الماضية.\n\n${summary}`, parse_mode: "Markdown" });
 
         case "ℹ️ معلومات عملة":
             waitingState = 'coin_info';
@@ -271,11 +353,14 @@ bot.on("message:text", async (ctx) => {
             return bot.api.sendMessage(ctx.from.id, "/settings");
     }
 
+    // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
     if (waitingState) {
-        switch (waitingState) {
+        const state = waitingState;
+        waitingState = null; // إعادة تعيين الحالة فورًا لمنع التداخل
+        switch (state) {
             case 'set_capital':
                 const amount = parseFloat(text);
-                if (!isNaN(amount) && amount > 0) {
+                if (!isNaN(amount) && amount >= 0) {
                     saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`);
                 } else { await ctx.reply("❌ مبلغ غير صالح."); }
                 break;
@@ -298,7 +383,8 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply("❌ صيغة غير صحيحة. يرجى استخدام الصيغة: `SYMBOL > PRICE`");
                 } else {
                     const alerts = loadAlerts();
-                    const newAlert = { id: crypto.randomUUID().slice(0, 8), instId: instId.toUpperCase(), condition, price, active: true };
+                    const formattedInstId = instId.includes('-') ? instId.toUpperCase() : `${instId.toUpperCase()}-USDT`;
+                    const newAlert = { id: crypto.randomUUID().slice(0, 8), instId: formattedInstId, condition, price, active: true };
                     alerts.push(newAlert);
                     saveAlerts(alerts);
                     await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nسأقوم بإعلامك عندما يصبح سعر ${newAlert.instId} ${condition} ${newAlert.price}.`);
@@ -329,7 +415,6 @@ bot.on("message:text", async (ctx) => {
                 }
                 break;
         }
-        waitingState = null;
     }
 });
 
