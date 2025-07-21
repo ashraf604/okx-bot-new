@@ -216,13 +216,13 @@ async function runDailyJobs() {
 
 // === واجهة البوت والأوامر ===
 
-// --- START: الإضافة والتصحيح ---
+// --- START: تمت إضافة زر الحاسبة هنا ---
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
     .text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row()
-    .text("🧮 حاسبة الربح والخسارة").row()
+    .text("🧮 حاسبة الربح والخسارة").row() // <-- هذا هو الزر الجديد
     .text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
-// --- END: الإضافة والتصحيح ---
+// --- END: تمت إضافة زر الحاسبة هنا ---
 
 bot.command("start", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
@@ -239,7 +239,7 @@ bot.command("settings", async (ctx) => {
     await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
 });
 
-// --- START: الإضافة والتصحيح ---
+// --- START: تمت إضافة أمر الحاسبة هنا ---
 bot.command("pnl", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const args = ctx.match.trim().split(/\s+/);
@@ -283,7 +283,7 @@ bot.command("pnl", async (ctx) => {
     `;
     await ctx.reply(responseMessage, { parse_mode: "Markdown" });
 });
-// --- END: الإضافة والتصحيح ---
+// --- END: تمت إضافة أمر الحاسبة هنا ---
 
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
@@ -348,7 +348,7 @@ bot.on("message:text", async (ctx) => {
             waitingState = 'coin_info';
             return await ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT).");
         
-        // --- START: الإضافة والتصحيح ---
+        // --- START: تمت إضافة معالج زر الحاسبة هنا ---
         case "🧮 حاسبة الربح والخسارة":
             return await ctx.reply(
                 "لحساب الربح أو الخسارة، استخدم الأمر `/pnl` بالشكل التالي:\n\n" +
@@ -356,7 +356,7 @@ bot.on("message:text", async (ctx) => {
                 "*مثال:*\n`/pnl 100 120 0.5`",
                 { parse_mode: "Markdown" }
             );
-        // --- END: الإضافة والتصحيح ---
+        // --- END: تمت إضافة معالج زر الحاسبة هنا ---
 
         case "🔔 ضبط تنبيه":
             waitingState = 'set_alert';
@@ -380,7 +380,7 @@ bot.on("message:text", async (ctx) => {
     // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
     if (waitingState) {
         const state = waitingState;
-        waitingState = null; // إعادة تعيين الحالة فورًا لمنع التداخل
+        waitingState = null; 
         switch (state) {
             case 'set_capital':
                 const amount = parseFloat(text);
@@ -426,25 +426,20 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
                 }
                 break;
-            // --- START: الإضافة والتصحيح ---
             case 'confirm_delete_all':
                 if (text.toLowerCase() === 'تأكيد') {
-                    // حذف الملفات
                     [CAPITAL_FILE, ALERTS_FILE, TRADES_FILE, HISTORY_FILE, SETTINGS_FILE].forEach(file => {
                         if (fs.existsSync(file)) fs.unlinkSync(file);
                     });
-                    // إيقاف المهام
                     if (tradeMonitoringInterval) clearInterval(tradeMonitoringInterval);
                     if (alertsCheckInterval) clearInterval(alertsCheckInterval);
                     if (dailyJobsInterval) clearInterval(dailyJobsInterval);
                     tradeMonitoringInterval = alertsCheckInterval = dailyJobsInterval = null;
-
                     await ctx.reply("🔥 تم حذف جميع البيانات وإيقاف المهام بنجاح. أعد تشغيل البوت للبدء من جديد.");
                 } else {
                     await ctx.reply("🚫 تم إلغاء عملية الحذف.");
                 }
                 break;
-            // --- END: الإضافة والتصحيح ---
         }
     }
 });
@@ -454,7 +449,7 @@ bot.on("message:text", async (ctx) => {
 if (process.env.NODE_ENV === "production") {
     app.use(express.json());
     app.use(webhookCallback(bot, "express"));
-    const webhookUrl = process.env.WEBHOOK_URL; // تأكد من وجود هذا المتغير في بيئة العمل
+    const webhookUrl = process.env.WEBHOOK_URL;
     app.listen(PORT, async () => {
         console.log(`Bot listening on port ${PORT}`);
         if (webhookUrl) {
