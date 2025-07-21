@@ -147,117 +147,57 @@ async function checkNewTrades() {
         const path = "/api/v5/trade/orders-history?instType=SPOT&state=filled";
         const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
         const json = await res.json();
-
-        if (json.code !== '0' || !json.data) {
-            return console.error("Failed to fetch trade history:", json.msg);
-        }
-
+        if (json.code !== '0' || !json.data) return console.error("Failed to fetch trade history:", json.msg);
         const lastTrades = loadLastTrades();
         let newTradesFound = false;
-
         for (const trade of json.data.reverse()) {
-            // ============ START: BLOCK REPLACED ============
             if (!lastTrades[trade.ordId]) {
-                const instId = trade.instId;
-                const ccy = instId.split('-')[0]; // للحصول على العملة الأساسية (مثل DORA)
+                const instId = trade.instId; const ccy = instId.split('-')[0];
                 let side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
-                const avgPx = parseFloat(trade.avgPx);
-                const sz = parseFloat(trade.sz);
-                const fee = parseFloat(trade.fee);
-
-                // --- هذا هو المنطق الجديد ---
+                const avgPx = parseFloat(trade.avgPx); const sz = parseFloat(trade.sz); const fee = parseFloat(trade.fee);
                 if (trade.side === 'sell') {
-                    // بعد عملية البيع، تحقق من الرصيد المتبقي
                     const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
                     const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
                     const balanceJson = await balanceRes.json();
-
                     let currentBalance = 0;
                     if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
                         currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
                     }
-
-                    // إذا كان الرصيد المتبقي صغيرًا جدًا (غبار)، اعتبره بيعًا كليًا
-                    if (currentBalance < 0.0001) {
-                        side = 'بيع كلي 🔴';
-                    } else {
-                        side = 'بيع جزئي 🔴';
-                    }
+                    if (currentBalance < 0.0001) { side = 'بيع كلي 🔴'; } else { side = 'بيع جزئي 🔴'; }
                 }
-                // --- نهاية المنطق الجديد ---
-
-                let message = `🔔 *صفقة جديدة!* 🔔\n\n`;
-                message += `*${side}* - *${instId}*\n\n`; // متغير `side` الآن محدث
-                message += `- *الكمية:* ${sz}\n`;
-                message += `- *متوسط السعر:* $${avgPx.toFixed(5)}\n`;
-                message += `- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n`;
-                message += `- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
-                if (parseFloat(trade.pnl) !== 0) {
-                    message += `- *الربح/الخسارة المحقق:* $${parseFloat(trade.pnl).toFixed(2)}\n`;
-                }
-
+                let message = `🔔 *صفقة جديدة!* 🔔\n\n*${side}* - *${instId}*\n\n- *الكمية:* ${sz}\n- *متوسط السعر:* $${avgPx.toFixed(5)}\n- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
+                if (parseFloat(trade.pnl) !== 0) { message += `- *الربح/الخسارة المحقق:* $${parseFloat(trade.pnl).toFixed(2)}\n`; }
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
-                lastTrades[trade.ordId] = true;
-                newTradesFound = true;
+                lastTrades[trade.ordId] = true; newTradesFound = true;
             }
-             // ============ END: BLOCK REPLACED ============
         }
-
-        if (newTradesFound) {
-            saveLastTrades(lastTrades);
-        }
-
-    } catch (error) {
-        console.error("Error in checkNewTrades:", error);
-    }
+        if (newTradesFound) { saveLastTrades(lastTrades); }
+    } catch (error) { console.error("Error in checkNewTrades:", error); }
 }
-
 
 async function checkAlerts() {
     const alerts = loadAlerts();
     if (alerts.length === 0) return;
-
     try {
         const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
         const tickersJson = await tickersRes.json();
-        if (tickersJson.code !== '0') {
-            return console.error("Failed to fetch tickers for alerts:", tickersJson.msg);
-        }
-
+        if (tickersJson.code !== '0') return console.error("Failed to fetch tickers for alerts:", tickersJson.msg);
         const prices = {};
         tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
-
-        const remainingAlerts = [];
-        let alertsTriggered = false;
-
+        const remainingAlerts = []; let alertsTriggered = false;
         for (const alert of alerts) {
-            if (!alert.active || !prices[alert.instId]) {
-                remainingAlerts.push(alert);
-                continue;
-            }
-
-            const currentPrice = prices[alert.instId];
-            let triggered = false;
-
+            if (!alert.active || !prices[alert.instId]) { remainingAlerts.push(alert); continue; }
+            const currentPrice = prices[alert.instId]; let triggered = false;
             if (alert.condition === '>' && currentPrice > alert.price) triggered = true;
             else if (alert.condition === '<' && currentPrice < alert.price) triggered = true;
-
             if (triggered) {
                 const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`;
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
                 alertsTriggered = true;
-            } else {
-                remainingAlerts.push(alert);
-            }
+            } else { remainingAlerts.push(alert); }
         }
-
-        if (alertsTriggered) {
-            saveAlerts(remainingAlerts);
-        }
-
-    } catch (error) {
-        console.error("Error in checkAlerts:", error);
-    }
+        if (alertsTriggered) { saveAlerts(remainingAlerts); }
+    } catch (error) { console.error("Error in checkAlerts:", error); }
 }
 
 async function runDailyJobs() {
@@ -276,10 +216,13 @@ async function runDailyJobs() {
 
 // === واجهة البوت والأوامر ===
 
+// --- START: الإضافة والتصحيح ---
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
     .text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row()
+    .text("🧮 حاسبة الربح والخسارة").row()
     .text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
+// --- END: الإضافة والتصحيح ---
 
 bot.command("start", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
@@ -295,6 +238,52 @@ bot.command("settings", async (ctx) => {
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
     await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
 });
+
+// --- START: الإضافة والتصحيح ---
+bot.command("pnl", async (ctx) => {
+    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
+    const args = ctx.match.trim().split(/\s+/);
+
+    if (args.length !== 3 || args[0] === '') {
+        return await ctx.reply(
+            "❌ *صيغة غير صحيحة.*\n\n" +
+            "يرجى استخدام الصيغة التالية:\n" +
+            "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" +
+            "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" }
+        );
+    }
+
+    const buyPrice = parseFloat(args[0]);
+    const sellPrice = parseFloat(args[1]);
+    const quantity = parseFloat(args[2]);
+
+    if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity)) {
+        return await ctx.reply("❌ *خطأ:* تأكد من أن جميع القيم التي أدخلتها هي أرقام صالحة.");
+    }
+    if (buyPrice <= 0) {
+        return await ctx.reply("❌ *خطأ:* سعر الشراء يجب أن يكون أكبر من صفر لحساب النسبة بشكل صحيح.");
+    }
+
+    const totalInvestment = buyPrice * quantity;
+    const totalSaleValue = sellPrice * quantity;
+    const profitOrLoss = totalSaleValue - totalInvestment;
+    const pnlPercentage = (profitOrLoss / totalInvestment) * 100;
+    const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻";
+
+    const responseMessage = `
+*📊 نتيجة الحساب:*
+
+- *إجمالي تكلفة الشراء:* \`$${totalInvestment.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`
+- *إجمالي قيمة البيع:* \`$${totalSaleValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`
+
+- *قيمة الربح/الخسارة:* \`$${profitOrLoss.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\`
+- *نسبة الربح/الخسارة:* \`${pnlPercentage.toFixed(2)}%\`
+
+*النتيجة النهائية: ${resultStatus}*
+    `;
+    await ctx.reply(responseMessage, { parse_mode: "Markdown" });
+});
+// --- END: الإضافة والتصحيح ---
 
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
@@ -358,6 +347,16 @@ bot.on("message:text", async (ctx) => {
         case "ℹ️ معلومات عملة":
             waitingState = 'coin_info';
             return await ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT).");
+        
+        // --- START: الإضافة والتصحيح ---
+        case "🧮 حاسبة الربح والخسارة":
+            return await ctx.reply(
+                "لحساب الربح أو الخسارة، استخدم الأمر `/pnl` بالشكل التالي:\n\n" +
+                "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" +
+                "*مثال:*\n`/pnl 100 120 0.5`",
+                { parse_mode: "Markdown" }
+            );
+        // --- END: الإضافة والتصحيح ---
 
         case "🔔 ضبط تنبيه":
             waitingState = 'set_alert';
@@ -427,37 +426,51 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
                 }
                 break;
+            // --- START: الإضافة والتصحيح ---
             case 'confirm_delete_all':
                 if (text.toLowerCase() === 'تأكيد') {
-                    saveCapital(0);
-                    saveAlerts([]);
-                    saveLastTrades({});
-                    saveHistory([]);
-                    saveSettings({ dailySummary: false });
-                    await ctx.reply("✅ تم حذف جميع البيانات بنجاح.");
+                    // حذف الملفات
+                    [CAPITAL_FILE, ALERTS_FILE, TRADES_FILE, HISTORY_FILE, SETTINGS_FILE].forEach(file => {
+                        if (fs.existsSync(file)) fs.unlinkSync(file);
+                    });
+                    // إيقاف المهام
+                    if (tradeMonitoringInterval) clearInterval(tradeMonitoringInterval);
+                    if (alertsCheckInterval) clearInterval(alertsCheckInterval);
+                    if (dailyJobsInterval) clearInterval(dailyJobsInterval);
+                    tradeMonitoringInterval = alertsCheckInterval = dailyJobsInterval = null;
+
+                    await ctx.reply("🔥 تم حذف جميع البيانات وإيقاف المهام بنجاح. أعد تشغيل البوت للبدء من جديد.");
                 } else {
-                    await ctx.reply("❌ تم إلغاء عملية الحذف.");
+                    await ctx.reply("🚫 تم إلغاء عملية الحذف.");
                 }
                 break;
+            // --- END: الإضافة والتصحيح ---
         }
     }
 });
 
-// === بدء تشغيل الخادم والمهام المجدولة ===
-app.use(express.json());
-app.use(webhookCallback(bot, "express"));
 
-app.listen(PORT, async () => {
-    console.log(`✅ Bot running on port ${PORT}`);
-    if (!alertsCheckInterval) { alertsCheckInterval = setInterval(checkAlerts, 60000); console.log("✅ Price alert checker started."); }
-    if (!dailyJobsInterval) { dailyJobsInterval = setInterval(runDailyJobs, 3600000); console.log("✅ Daily jobs scheduler started."); }
-    try {
-        const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
-        if (domain) {
-            const webhookUrl = `https://${domain}`;
-            await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
-            console.log(`✅ Webhook set to: ${webhookUrl}`);
-        } else { console.warn("Webhook URL not set. Bot will run in polling mode locally."); }
-    } catch (e) { console.error("Error setting webhook:", e); }
-});
+// === بدء تشغيل البوت ===
+if (process.env.NODE_ENV === "production") {
+    app.use(express.json());
+    app.use(webhookCallback(bot, "express"));
+    const webhookUrl = process.env.WEBHOOK_URL; // تأكد من وجود هذا المتغير في بيئة العمل
+    app.listen(PORT, async () => {
+        console.log(`Bot listening on port ${PORT}`);
+        if (webhookUrl) {
+            await bot.api.setWebhook(`${webhookUrl}/${process.env.TELEGRAM_BOT_TOKEN}`);
+        } else {
+            console.error("WEBHOOK_URL environment variable not set!");
+        }
+        alertsCheckInterval = setInterval(checkAlerts, 60000);
+        dailyJobsInterval = setInterval(runDailyJobs, 3600000 * 4);
+    });
+} else {
+    bot.start({
+        onStart: () => console.log("Bot started in development mode."),
+    });
+    alertsCheckInterval = setInterval(checkAlerts, 60000);
+    dailyJobsInterval = setInterval(runDailyJobs, 3600000 * 4);
+}
 
+console.log("OKX Advanced Analytics Bot is initializing...");
