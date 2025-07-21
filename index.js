@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final & Complete Version
+// OKX Advanced Analytics Bot - Final, Corrected, & Complete Version
 // =================================================================
 
 const express = require("express");
@@ -164,7 +164,6 @@ async function checkNewTrades() {
                 const sz = parseFloat(trade.sz);
                 const fee = parseFloat(trade.fee);
 
-                // --- Improvement to check for Full/Partial Sell ---
                 if (trade.side === 'sell') {
                     const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
                     const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
@@ -173,13 +172,12 @@ async function checkNewTrades() {
                     if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
                         currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
                     }
-                    if (currentBalance < 0.0001) { // Use a small threshold for dust
+                    if (currentBalance < 0.0001) {
                         side = 'بيع كلي 🔴';
                     } else {
                         side = 'بيع جزئي 🔴';
                     }
                 }
-                // --- End of Improvement ---
 
                 let message = `🔔 *صفقة جديدة!* 🔔\n\n`;
                 message += `*${side}* - *${instId}*\n\n`;
@@ -358,7 +356,7 @@ bot.on("message:text", async (ctx) => {
 
         case "👁️ مراقبة الصفقات":
             if (!tradeMonitoringInterval) {
-                await checkNewTrades();
+                await checkNewTrades(); // Run once immediately
                 tradeMonitoringInterval = setInterval(checkNewTrades, 60000);
                 return await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة.");
             } else {
@@ -374,7 +372,7 @@ bot.on("message:text", async (ctx) => {
     // --- 2. Handle Inputs Based on waitingState ---
     if (waitingState) {
         const state = waitingState;
-        waitingState = null; // Reset state immediately to prevent race conditions
+        waitingState = null; // Reset state immediately
         switch (state) {
             case 'set_capital':
                 const amount = parseFloat(text);
@@ -429,3 +427,11 @@ bot.on("message:text", async (ctx) => {
                     saveSettings({ dailySummary: false });
                     await ctx.reply("✅ تم حذف جميع البيانات بنجاح.");
                 } else {
+                    await ctx.reply("❌ تم إلغاء عملية الحذف.");
+                }
+                break;
+        }
+    }
+});
+
+// === Server 
