@@ -44,5 +44,25 @@ bot.callbackQuery("performance", async (ctx) => { const history = loadHistory();
 // ========== 🚀 تشغيل البوت ============= const app = express(); app.use(express.json()); app.use(webhookCallback(bot, "express"));
 
 const server = app.listen(8080, () => { console.log("✅ Bot running on port 8080"); runDailyJobs(); alertsCheckInterval = setInterval(checkAlerts, 60000); // 🔔 تنبيهات كل دقيقة });
+// ========== 🚀 تشغيل البوت =============
+const app = express();
+app.use(express.json());
 
+// استخدام Webhook
+app.use(webhookCallback(bot, "express"));
+
+// دالة لبدء المهام بعد تشغيل السيرفر
+async function startTasks() {
+    console.log("🚀 Starting daily jobs and alert checks...");
+    await runDailyJobs(); // تشغيل الملخص اليومي عند البدء
+    alertsCheckInterval = setInterval(checkAlerts, 60000); // 🔔 تفقد التنبيهات كل دقيقة
+    console.log("✅ Daily jobs and alerts are now running.");
+}
+
+// تشغيل السيرفر والمهام
+app.listen(8080, () => {
+    console.log("✅ Bot server is running on port 8080");
+    startTasks(); // استدعاء دالة المهام من هنا
+});
+                                       
                           
