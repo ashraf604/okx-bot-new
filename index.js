@@ -1,6 +1,5 @@
- =================================================================
+// =================================================================
 // OKX Advanced Analytics Bot - Final, Meticulously Reviewed Version
-// مع ميزة النسخ الاحتياطي الجديدة
 // =================================================================
 
 const express = require("express");
@@ -43,83 +42,6 @@ function writeJsonFile(filePath, data) {
     try {
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     } catch (error) { console.error(`Error writing to ${filePath}:`, error); }
-}
-
-// === 🆕 دوال النسخ الاحتياطي الجديدة ===
-
-function exportAllData() {
-    try {
-        const backupData = {
-            metadata: {
-                exportDate: new Date().toISOString(),
-                version: "1.0",
-                botName: "OKX Advanced Analytics Bot"
-            },
-            capital: readJsonFile(CAPITAL_FILE, 0),
-            alerts: readJsonFile(ALERTS_FILE, []),
-            trades: readJsonFile(TRADES_FILE, {}),
-            history: readJsonFile(HISTORY_FILE, []),
-            settings: readJsonFile(SETTINGS_FILE, { dailySummary: false })
-        };
-        
-        const backupFileName = `okx_bot_backup_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.json`;
-        const backupPath = `./${backupFileName}`;
-        
-        writeJsonFile(backupPath, backupData);
-        console.log(`[✅ Data Export]: Backup created successfully - ${backupFileName}`);
-        return { success: true, fileName: backupFileName, filePath: backupPath };
-    } catch (error) {
-        console.error('Error creating backup:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-function importAllData(backupData) {
-    try {
-        // التحقق من صحة البيانات
-        if (!backupData.metadata || !backupData.metadata.botName) {
-            return { success: false, error: "ملف النسخ الاحتياطي غير صالح أو تالف." };
-        }
-        
-        // إنشاء نسخ احتياطية من البيانات الحالية قبل الاستيراد
-        const currentBackup = {
-            capital: readJsonFile(CAPITAL_FILE, 0),
-            alerts: readJsonFile(ALERTS_FILE, []),
-            trades: readJsonFile(TRADES_FILE, {}),
-            history: readJsonFile(HISTORY_FILE, []),
-            settings: readJsonFile(SETTINGS_FILE, { dailySummary: false })
-        };
-        
-        const rollbackFileName = `rollback_backup_${Date.now()}.json`;
-        writeJsonFile(rollbackFileName, currentBackup);
-        
-        // استعادة البيانات
-        if (typeof backupData.capital === 'number') {
-            saveCapital(backupData.capital);
-        }
-        
-        if (Array.isArray(backupData.alerts)) {
-            saveAlerts(backupData.alerts);
-        }
-        
-        if (typeof backupData.trades === 'object') {
-            saveLastTrades(backupData.trades);
-        }
-        
-        if (Array.isArray(backupData.history)) {
-            saveHistory(backupData.history);
-        }
-        
-        if (typeof backupData.settings === 'object') {
-            saveSettings({ dailySummary: false, ...backupData.settings });
-        }
-        
-        console.log(`[✅ Data Import]: Data restored successfully from backup dated ${backupData.metadata.exportDate}`);
-        return { success: true, rollbackFile: rollbackFileName };
-    } catch (error) {
-        console.error('Error importing backup:', error);
-        return { success: false, error: error.message };
-    }
 }
 
 const loadCapital = () => readJsonFile(CAPITAL_FILE, 0);
@@ -307,14 +229,12 @@ bot.command("start", async (ctx) => {
     await ctx.reply("🤖 *بوت OKX التحليلي المتكامل*\n\n- أهلاً بك! الواجهة الرئيسية للوصول السريع، والإدارة الكاملة من قائمة /settings.", { parse_mode: "Markdown", reply_markup: mainKeyboard });
 });
 
-// 🆕 قائمة الإعدادات المحدثة مع أزرار النسخ الاحتياطي
 bot.command("settings", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const settings = loadSettings();
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
-        .text("💾 تصدير النسخ الاحتياطي", "export_backup").text("📁 استيراد النسخ الاحتياطي", "import_backup").row()  // 🆕 الأزرار الجديدة
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
     await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
 });
@@ -365,57 +285,6 @@ bot.command("pnl", async (ctx) => {
 });
 // --- END: تمت إضافة أمر الحاسبة هنا ---
 
-// === 🆕 معالجات النسخ الاحتياطي الجديدة ===
-
-bot.callbackQuery("export_backup", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.reply("⏳ جار إنشاء النسخة الاحتياطية...");
-    
-    const result = exportAllData();
-    
-    if (result.success) {
-        try {
-            // إرسال الملف للمستخدم
-            await ctx.replyWithDocument(result.filePath, {
-                caption: `💾 *تم إنشاء النسخة الاحتياطية بنجاح!*\n\n` +
-                        `📁 اسم الملف: \`${result.fileName}\`\n` +
-                        `📅 تاريخ الإنشاء: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}\n\n` +
-                        `⚠️ *مهم:* احتفظ بهذا الملف في مكان آمن لاستعادة بياناتك لاحقاً.`,
-                parse_mode: "Markdown"
-            });
-            
-            // حذف الملف المؤقت من الخادم
-            if (fs.existsSync(result.filePath)) {
-                fs.unlinkSync(result.filePath);
-            }
-        } catch (error) {
-            console.error("Error sending backup file:", error);
-            await ctx.reply("❌ فشل في إرسال ملف النسخة الاحتياطية. حاول مرة أخرى.");
-        }
-    } else {
-        await ctx.reply(`❌ فشل في إنشاء النسخة الاحتياطية: ${result.error}`);
-    }
-});
-
-bot.callbackQuery("import_backup", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.reply(
-        "📁 *استيراد النسخة الاحتياطية*\n\n" +
-        "أرسل ملف النسخة الاحتياطية (JSON) الذي تريد استيراده.\n\n" +
-        "⚠️ *تحذير:* سيتم استبدال جميع البيانات الحالية. سيتم إنشاء نسخة احتياطية من البيانات الحالية قبل الاستيراد للتراجع إذا لزم الأمر.\n\n" +
-        "❌ أرسل `إلغاء` لإلغاء العملية.",
-        { parse_mode: "Markdown" }
-    );
-    waitingState = 'awaiting_backup_file';
-    
-    // إلغاء العملية تلقائياً بعد دقيقتين
-    setTimeout(() => { 
-        if (waitingState === 'awaiting_backup_file') {
-            waitingState = null;
-        }
-    }, 120000);
-});
-
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
 
@@ -438,7 +307,6 @@ bot.callbackQuery("toggle_summary", async (ctx) => {
     const updatedKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
-        .text("💾 تصدير النسخ الاحتياطي", "export_backup").text("📁 استيراد النسخ الاحتياطي", "import_backup").row()  // 🆕 الأزرار الجديدة
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
     await ctx.editMessageReplyMarkup({ reply_markup: updatedKeyboard });
 });
@@ -448,62 +316,6 @@ bot.callbackQuery("delete_all_data", async (ctx) => {
     await ctx.reply("⚠️ هل أنت متأكد من حذف كل البيانات؟ هذا الإجراء لا يمكن التراجع عنه.\n\nأرسل كلمة `تأكيد` خلال 30 ثانية.", { parse_mode: "Markdown" });
     waitingState = 'confirm_delete_all';
     setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000);
-});
-
-// === 🆕 معالج الملفات المرفوعة (للنسخ الاحتياطي) ===
-bot.on("message:document", async (ctx) => {
-    if (ctx.from.id !== AUTHORIZED_USER_ID) return;
-    
-    if (waitingState === 'awaiting_backup_file') {
-        waitingState = null;
-        
-        const document = ctx.message.document;
-        
-        // التحقق من نوع الملف
-        if (!document.file_name.endsWith('.json')) {
-            return await ctx.reply("❌ يجب أن يكون الملف من نوع JSON. أرسل ملف النسخة الاحتياطية الصحيح.");
-        }
-        
-        try {
-            await ctx.reply("⏳ جار معالجة ملف النسخة الاحتياطية...");
-            
-            // الحصول على الملف من تليجرام
-            const file = await ctx.api.getFile(document.file_id);
-            const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-            
-            // تنزيل وقراءة محتوى الملف
-            const response = await fetch(fileUrl);
-            const fileContent = await response.text();
-            const backupData = JSON.parse(fileContent);
-            
-            // استيراد البيانات
-            const result = importAllData(backupData);
-            
-            if (result.success) {
-                let successMessage = `✅ *تم استيراد النسخة الاحتياطية بنجاح!*\n\n`;
-                
-                if (backupData.metadata && backupData.metadata.exportDate) {
-                    successMessage += `📅 تاريخ النسخة: ${new Date(backupData.metadata.exportDate).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}\n`;
-                }
-                
-                successMessage += `💾 تم إنشاء ملف تراجع: \`${result.rollbackFile}\`\n\n`;
-                successMessage += `🔄 *يُنصح بإعادة تشغيل البوت للتأكد من تطبيق جميع الإعدادات الجديدة.*`;
-                
-                await ctx.reply(successMessage, { parse_mode: "Markdown" });
-                
-                // إعادة تحميل الإعدادات إذا كانت مختلفة
-                const newSettings = loadSettings();
-                console.log('[✅ Data Import]: Settings reloaded after import');
-                
-            } else {
-                await ctx.reply(`❌ فشل في استيراد النسخة الاحتياطية:\n${result.error}`);
-            }
-            
-        } catch (error) {
-            console.error('Error processing backup file:', error);
-            await ctx.reply(`❌ خطأ في معالجة الملف: ${error.message}\n\nتأكد من أن الملف هو نسخة احتياطية صالحة.`);
-        }
-    }
 });
 
 // === المعالج الشامل للرسائل النصية ===
@@ -628,14 +440,6 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply("🚫 تم إلغاء عملية الحذف.");
                 }
                 break;
-            // 🆕 معالج حالة انتظار ملف النسخ الاحتياطي
-            case 'awaiting_backup_file':
-                if (text.toLowerCase() === 'إلغاء') {
-                    await ctx.reply("❌ تم إلغاء عملية استيراد النسخة الاحتياطية.");
-                } else {
-                    await ctx.reply("📁 يرجى إرسال ملف النسخة الاحتياطية (JSON) أو أرسل `إلغاء` لإلغاء العملية.");
-                }
-                break;
         }
     }
 });
@@ -658,10 +462,10 @@ if (process.env.NODE_ENV === "production") {
     });
 } else {
     bot.start({
-        onStart: () => console.log("🚀 OKX Bot with Backup Features started in development mode."),
+        onStart: () => console.log("Bot started in development mode."),
     });
     alertsCheckInterval = setInterval(checkAlerts, 60000);
     dailyJobsInterval = setInterval(runDailyJobs, 3600000 * 4);
 }
 
-console.log("🤖 OKX Advanced Analytics Bot with Backup Features is initializing...");
+console.log("OKX Advanced Analytics Bot is initializing...");
