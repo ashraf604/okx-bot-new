@@ -17,11 +17,16 @@ const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 
 // --- ملفات تخزين البيانات ---
-const CAPITAL_FILE = "data_capital.json";
-const ALERTS_FILE = "data_alerts.json";
-const TRADES_FILE = "data_trades.json";
-const HISTORY_FILE = "data_history.json";
-const SETTINGS_FILE = "data_settings.json";
+const DATA_DIR = "./data";
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR);
+}
+const CAPITAL_FILE = `${DATA_DIR}/data_capital.json`;
+const ALERTS_FILE = `${DATA_DIR}/data_alerts.json`;
+const TRADES_FILE = `${DATA_DIR}/data_trades.json`;
+const HISTORY_FILE = `${DATA_DIR}/data_history.json`;
+const SETTINGS_FILE = `${DATA_DIR}/data_settings.json`;
+
 
 // --- متغيرات الحالة والمؤشرات ---
 let waitingState = null;
@@ -142,38 +147,114 @@ function createChartUrl(history) {
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
 }
 
-async function checkNewTrades() {
+// ==========================================================
+// START: دالة مراقبة الصفقات المعدلة والمحسنة
+// ==========================================================
+async function checkNewTrades(isManualTrigger = false) {
     try {
+        // عند التشغيل اليدوي، أرسل رسالة للمستخدم
+        if (isManualTrigger) {
+            await bot.api.sendMessage(AUTHORIZED_USER_ID, "🔍 جار التحقق من وجود صفقات جديدة...");
+        }
+
         const path = "/api/v5/trade/orders-history?instType=SPOT&state=filled";
         const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
         const json = await res.json();
-        if (json.code !== '0' || !json.data) return console.error("Failed to fetch trade history:", json.msg);
+
+        // تحقق من وجود خطأ في الاستجابة من المنصة
+        if (json.code !== '0') {
+            const errorMessage = `❌ فشل جلب سجل الصفقات من OKX.\nالسبب: ${json.msg || 'استجابة غير معروفة'}`;
+            console.error(errorMessage);
+            // أبلغ المستخدم بالخطأ فقط عند التشغيل اليدوي لتجنب إرسال رسائل متكررة
+            if (isManualTrigger) {
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, errorMessage);
+            }
+            return;
+        }
+
+        // تحقق مما إذا كانت البيانات فارغة
+        if (!json.data || json.data.length === 0) {
+            if (isManualTrigger) {
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, "✅ لا توجد أي صفقات جديدة مكتملة في السجل الحديث.");
+            }
+            return;
+        }
+
         const lastTrades = loadLastTrades();
         let newTradesFound = false;
+        let notificationsSent = 0;
+
+        // اعكس ترتيب الصفقات لمعالجتها من الأقدم إلى الأحدث
         for (const trade of json.data.reverse()) {
             if (!lastTrades[trade.ordId]) {
-                const instId = trade.instId; const ccy = instId.split('-')[0];
+                newTradesFound = true;
+                console.log(`[Trade Found]: New trade detected with ID: ${trade.ordId}`);
+
+                const instId = trade.instId;
+                const ccy = instId.split('-')[0];
                 let side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
-                const avgPx = parseFloat(trade.avgPx); const sz = parseFloat(trade.sz); const fee = parseFloat(trade.fee);
+                const avgPx = parseFloat(trade.avgPx);
+                const sz = parseFloat(trade.sz);
+                const fee = parseFloat(trade.fee);
+
+                // منطق تحديد البيع الكلي أو الجزئي
                 if (trade.side === 'sell') {
                     const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
-                    const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
-                    const balanceJson = await balanceRes.json();
-                    let currentBalance = 0;
-                    if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
-                        currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
+                    try {
+                        const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
+                        const balanceJson = await balanceRes.json();
+                        let currentBalance = 0;
+                        if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
+                            currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
+                        }
+                        if (currentBalance < 0.0001) { side = 'بيع كلي 🔴'; } 
+                        else { side = 'بيع جزئي 🔴'; }
+                    } catch (e) {
+                         console.error(`Error checking balance for ${ccy}, defaulting to 'بيع' side.`, e);
+                         side = 'بيع 🔴'; // fallback
                     }
-                    if (currentBalance < 0.0001) { side = 'بيع كلي 🔴'; } else { side = 'بيع جزئي 🔴'; }
                 }
-                let message = `🔔 *صفقة جديدة!* 🔔\n\n*${side}* - *${instId}*\n\n- *الكمية:* ${sz}\n- *متوسط السعر:* $${avgPx.toFixed(5)}\n- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
-                if (parseFloat(trade.pnl) !== 0) { message += `- *الربح/الخسارة المحقق:* $${parseFloat(trade.pnl).toFixed(2)}\n`; }
+
+                let message = `🔔 *صفقة جديدة!* 🔔\n\n` +
+                              `*${side}* - *${instId}*\n\n` +
+                              `- *الكمية:* \`${sz}\`\n` +
+                              `- *متوسط السعر:* \`$${avgPx.toFixed(5)}\`\n` +
+                              `- *قيمة الصفقة:* \`$${(sz * avgPx).toFixed(2)}\`\n` +
+                              `- *الرسوم:* \`$${fee.toFixed(4)}\` (${trade.feeCcy})\n`;
+
+                if (parseFloat(trade.pnl) !== 0) {
+                    message += `- *الربح/الخسارة المحقق:* \`$${parseFloat(trade.pnl).toFixed(2)}\`\n`;
+                }
+                
+                message += `\n*ID:* \`${trade.ordId}\``;
+
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
-                lastTrades[trade.ordId] = true; newTradesFound = true;
+                notificationsSent++;
+                lastTrades[trade.ordId] = true;
             }
         }
-        if (newTradesFound) { saveLastTrades(lastTrades); }
-    } catch (error) { console.error("Error in checkNewTrades:", error); }
+
+        if (newTradesFound) {
+            console.log(`[Trades Processed]: ${notificationsSent} new trade notifications sent.`);
+            saveLastTrades(lastTrades);
+            if (isManualTrigger && notificationsSent === 0) {
+                 await bot.api.sendMessage(AUTHORIZED_USER_ID, "ℹ️ تم العثور على صفقات في السجل، ولكن تم إرسال إشعارات بها مسبقاً. لا يوجد جديد.");
+            }
+        } else if (isManualTrigger) {
+            await bot.api.sendMessage(AUTHORIZED_USER_ID, "✅ سجل الصفقات محدّث، لا يوجد أي جديد.");
+        }
+
+    } catch (error) {
+        console.error("Error in checkNewTrades:", error);
+        if (isManualTrigger) {
+            await bot.api.sendMessage(AUTHORIZED_USER_ID, `🚨 حدث خطأ فني أثناء التحقق من الصفقات. يرجى مراجعة سجلات الخادم.`);
+        }
+    }
 }
+// ==========================================================
+// END: دالة مراقبة الصفقات المعدلة والمحسنة
+// ==========================================================
+
 
 async function checkAlerts() {
     const alerts = loadAlerts();
@@ -216,13 +297,11 @@ async function runDailyJobs() {
 
 // === واجهة البوت والأوامر ===
 
-// --- START: تمت إضافة زر الحاسبة هنا ---
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
     .text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row()
-    .text("🧮 حاسبة الربح والخسارة").row() // <-- هذا هو الزر الجديد
+    .text("🧮 حاسبة الربح والخسارة").row()
     .text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
-// --- END: تمت إضافة زر الحاسبة هنا ---
 
 bot.command("start", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
@@ -239,7 +318,6 @@ bot.command("settings", async (ctx) => {
     await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
 });
 
-// --- START: تمت إضافة أمر الحاسبة هنا ---
 bot.command("pnl", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const args = ctx.match.trim().split(/\s+/);
@@ -283,7 +361,6 @@ bot.command("pnl", async (ctx) => {
     `;
     await ctx.reply(responseMessage, { parse_mode: "Markdown" });
 });
-// --- END: تمت إضافة أمر الحاسبة هنا ---
 
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
@@ -343,129 +420,3 @@ bot.on("message:text", async (ctx) => {
             const percent = previous > 0 ? (diff / previous) * 100 : 0;
             const summary = `*تغير آخر يوم:*\n${diff >= 0 ? '🟢' : '🔴'} $${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
             return await ctx.replyWithPhoto(chartUrl, { caption: `أداء محفظتك خلال الأيام السبعة الماضية.\n\n${summary}`, parse_mode: "Markdown" });
-
-        case "ℹ️ معلومات عملة":
-            waitingState = 'coin_info';
-            return await ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT).");
-        
-        // --- START: تمت إضافة معالج زر الحاسبة هنا ---
-        case "🧮 حاسبة الربح والخسارة":
-            return await ctx.reply(
-                "لحساب الربح أو الخسارة، استخدم الأمر `/pnl` بالشكل التالي:\n\n" +
-                "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" +
-                "*مثال:*\n`/pnl 100 120 0.5`",
-                { parse_mode: "Markdown" }
-            );
-        // --- END: تمت إضافة معالج زر الحاسبة هنا ---
-
-        case "🔔 ضبط تنبيه":
-            waitingState = 'set_alert';
-            return await ctx.reply("📝 *أرسل تفاصيل التنبيه:*\n`SYMBOL > PRICE` أو `SYMBOL < PRICE`", { parse_mode: "Markdown" });
-
-        case "👁️ مراقبة الصفقات":
-            if (!tradeMonitoringInterval) {
-                await checkNewTrades();
-                tradeMonitoringInterval = setInterval(checkNewTrades, 60000);
-                return await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة.");
-            } else {
-                clearInterval(tradeMonitoringInterval);
-                tradeMonitoringInterval = null;
-                return await ctx.reply("🛑 تم إيقاف مراقبة الصفقات الجديدة.");
-            }
-
-        case "⚙️ الإعدادات":
-            return bot.api.sendMessage(ctx.from.id, "/settings");
-    }
-
-    // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
-    if (waitingState) {
-        const state = waitingState;
-        waitingState = null; 
-        switch (state) {
-            case 'set_capital':
-                const amount = parseFloat(text);
-                if (!isNaN(amount) && amount >= 0) {
-                    saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`);
-                } else { await ctx.reply("❌ مبلغ غير صالح."); }
-                break;
-            case 'coin_info':
-                const { error, ...details } = await getInstrumentDetails(text);
-                if (error) { await ctx.reply(`❌ ${error}`); }
-                else {
-                    let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n`;
-                    msg += `- *السعر الحالي:* \`$${details.price}\`\n`;
-                    msg += `- *أعلى سعر (24س):* \`$${details.high24h}\`\n`;
-                    msg += `- *أدنى سعر (24س):* \`$${details.low24h}\`\n`;
-                    msg += `- *حجم التداول (24س):* \`${details.vol24h.toFixed(2)} ${text.split('-')[0]}\``;
-                    await ctx.reply(msg, { parse_mode: "Markdown" });
-                }
-                break;
-            case 'set_alert':
-                const [instId, condition, priceStr] = text.split(" ");
-                const price = parseFloat(priceStr);
-                if (!instId || !condition || !priceStr || !['>', '<'].includes(condition) || isNaN(price)) {
-                    await ctx.reply("❌ صيغة غير صحيحة. يرجى استخدام الصيغة: `SYMBOL > PRICE`");
-                } else {
-                    const alerts = loadAlerts();
-                    const formattedInstId = instId.includes('-') ? instId.toUpperCase() : `${instId.toUpperCase()}-USDT`;
-                    const newAlert = { id: crypto.randomUUID().slice(0, 8), instId: formattedInstId, condition, price, active: true };
-                    alerts.push(newAlert);
-                    saveAlerts(alerts);
-                    await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nسأقوم بإعلامك عندما يصبح سعر ${newAlert.instId} ${condition} ${newAlert.price}.`);
-                }
-                break;
-            case 'delete_alert':
-                const alertId = text;
-                let alerts = loadAlerts();
-                const initialLength = alerts.length;
-                alerts = alerts.filter(a => a.id !== alertId);
-                if (alerts.length === initialLength) {
-                    await ctx.reply("❌ لم يتم العثور على تنبيه بهذا الـ ID.");
-                } else {
-                    saveAlerts(alerts);
-                    await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
-                }
-                break;
-            case 'confirm_delete_all':
-                if (text.toLowerCase() === 'تأكيد') {
-                    [CAPITAL_FILE, ALERTS_FILE, TRADES_FILE, HISTORY_FILE, SETTINGS_FILE].forEach(file => {
-                        if (fs.existsSync(file)) fs.unlinkSync(file);
-                    });
-                    if (tradeMonitoringInterval) clearInterval(tradeMonitoringInterval);
-                    if (alertsCheckInterval) clearInterval(alertsCheckInterval);
-                    if (dailyJobsInterval) clearInterval(dailyJobsInterval);
-                    tradeMonitoringInterval = alertsCheckInterval = dailyJobsInterval = null;
-                    await ctx.reply("🔥 تم حذف جميع البيانات وإيقاف المهام بنجاح. أعد تشغيل البوت للبدء من جديد.");
-                } else {
-                    await ctx.reply("🚫 تم إلغاء عملية الحذف.");
-                }
-                break;
-        }
-    }
-});
-
-
-// === بدء تشغيل البوت ===
-if (process.env.NODE_ENV === "production") {
-    app.use(express.json());
-    app.use(webhookCallback(bot, "express"));
-    const webhookUrl = process.env.WEBHOOK_URL;
-    app.listen(PORT, async () => {
-        console.log(`Bot listening on port ${PORT}`);
-        if (webhookUrl) {
-            await bot.api.setWebhook(`${webhookUrl}/${process.env.TELEGRAM_BOT_TOKEN}`);
-        } else {
-            console.error("WEBHOOK_URL environment variable not set!");
-        }
-        alertsCheckInterval = setInterval(checkAlerts, 60000);
-        dailyJobsInterval = setInterval(runDailyJobs, 3600000 * 4);
-    });
-} else {
-    bot.start({
-        onStart: () => console.log("Bot started in development mode."),
-    });
-    alertsCheckInterval = setInterval(checkAlerts, 60000);
-    dailyJobsInterval = setInterval(runDailyJobs, 3600000 * 4);
-}
-
-console.log("OKX Advanced Analytics Bot is initializing...");
