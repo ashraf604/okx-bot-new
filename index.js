@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final, Corrected, & Complete Version
+// OKX Advanced Analytics Bot - Final, Meticulously Reviewed Version
 // =================================================================
 
 const express = require("express");
@@ -9,27 +9,27 @@ const crypto = require("crypto");
 const fs = require("fs");
 require("dotenv").config();
 
-// --- Bot Core Settings ---
+// --- إعدادات البوت الأساسية ---
 const app = express();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 
-// --- Data Storage Files ---
+// --- ملفات تخزين البيانات ---
 const CAPITAL_FILE = "data_capital.json";
 const ALERTS_FILE = "data_alerts.json";
 const TRADES_FILE = "data_trades.json";
 const HISTORY_FILE = "data_history.json";
 const SETTINGS_FILE = "data_settings.json";
 
-// --- State and Interval Variables ---
+// --- متغيرات الحالة والمؤشرات ---
 let waitingState = null;
 let tradeMonitoringInterval = null;
 let alertsCheckInterval = null;
 let dailyJobsInterval = null;
 
-// === Helper & File Management Functions ===
+// === دوال مساعدة وإدارة الملفات ===
 
 function readJsonFile(filePath, defaultValue) {
     try {
@@ -55,7 +55,7 @@ const saveHistory = (history) => writeJsonFile(HISTORY_FILE, history);
 const loadSettings = () => readJsonFile(SETTINGS_FILE, { dailySummary: false });
 const saveSettings = (settings) => writeJsonFile(SETTINGS_FILE, settings);
 
-// === API Functions ===
+// === دوال API ===
 
 function getHeaders(method, path, body = "") {
     const timestamp = new Date().toISOString();
@@ -109,7 +109,7 @@ async function getInstrumentDetails(instId) {
     } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; }
 }
 
-// === Display & Scheduled Task Functions ===
+// === دوال العرض والمهام المجدولة ===
 
 function formatPortfolioMsg(assets, total, capital) {
     let pnl = capital > 0 ? total - capital : 0;
@@ -157,32 +157,16 @@ async function checkNewTrades() {
 
         for (const trade of json.data.reverse()) {
             if (!lastTrades[trade.ordId]) {
+                const side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
                 const instId = trade.instId;
-                const ccy = instId.split('-')[0];
-                let side = trade.side === 'buy' ? 'شراء 🟢' : 'بيع 🔴';
-                const avgPx = parseFloat(trade.avgPx);
+                const avgPx = parseFloat(trade.avgPx).toFixed(5);
                 const sz = parseFloat(trade.sz);
                 const fee = parseFloat(trade.fee);
-
-                if (trade.side === 'sell') {
-                    const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
-                    const balanceRes = await fetch(`${API_BASE_URL}${balancePath}`, { headers: getHeaders("GET", balancePath) });
-                    const balanceJson = await balanceRes.json();
-                    let currentBalance = 0;
-                    if (balanceJson.code === '0' && balanceJson.data[0]?.details[0]) {
-                        currentBalance = parseFloat(balanceJson.data[0].details[0].availBal);
-                    }
-                    if (currentBalance < 0.0001) {
-                        side = 'بيع كلي 🔴';
-                    } else {
-                        side = 'بيع جزئي 🔴';
-                    }
-                }
 
                 let message = `🔔 *صفقة جديدة!* 🔔\n\n`;
                 message += `*${side}* - *${instId}*\n\n`;
                 message += `- *الكمية:* ${sz}\n`;
-                message += `- *متوسط السعر:* $${avgPx.toFixed(5)}\n`;
+                message += `- *متوسط السعر:* $${avgPx}\n`;
                 message += `- *قيمة الصفقة:* $${(sz * avgPx).toFixed(2)}\n`;
                 message += `- *الرسوم:* $${fee.toFixed(4)} (${trade.feeCcy})\n`;
                 if (parseFloat(trade.pnl) !== 0) {
@@ -265,7 +249,7 @@ async function runDailyJobs() {
     console.log(`[✅ Daily Summary]: ${date} - $${total.toFixed(2)}`);
 }
 
-// === Bot UI and Command Handlers ===
+// === واجهة البوت والأوامر ===
 
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
@@ -287,7 +271,7 @@ bot.command("settings", async (ctx) => {
     await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
 });
 
-// === Inline Keyboard Callbacks ===
+// === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
 
 bot.callbackQuery("view_alerts", async (ctx) => {
@@ -320,12 +304,12 @@ bot.callbackQuery("delete_all_data", async (ctx) => {
     setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000);
 });
 
-// === Main Text Message Handler ===
+// === المعالج الشامل للرسائل النصية ===
 bot.on("message:text", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const text = ctx.message.text.trim();
 
-    // --- 1. Handle Main Keyboard Buttons ---
+    // --- 1. التعامل مع الأوامر المباشرة (أزرار الواجهة الرئيسية) ---
     switch (text) {
         case "📊 عرض المحفظة":
             await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
@@ -356,7 +340,7 @@ bot.on("message:text", async (ctx) => {
 
         case "👁️ مراقبة الصفقات":
             if (!tradeMonitoringInterval) {
-                await checkNewTrades(); // Run once immediately
+                await checkNewTrades();
                 tradeMonitoringInterval = setInterval(checkNewTrades, 60000);
                 return await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة.");
             } else {
@@ -369,10 +353,10 @@ bot.on("message:text", async (ctx) => {
             return bot.api.sendMessage(ctx.from.id, "/settings");
     }
 
-    // --- 2. Handle Inputs Based on waitingState ---
+    // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
     if (waitingState) {
         const state = waitingState;
-        waitingState = null; // Reset state immediately
+        waitingState = null; // إعادة تعيين الحالة فورًا لمنع التداخل
         switch (state) {
             case 'set_capital':
                 const amount = parseFloat(text);
@@ -434,4 +418,20 @@ bot.on("message:text", async (ctx) => {
     }
 });
 
-// === Server 
+// === بدء تشغيل الخادم والمهام المجدولة ===
+app.use(express.json());
+app.use(webhookCallback(bot, "express"));
+
+app.listen(PORT, async () => {
+    console.log(`✅ Bot running on port ${PORT}`);
+    if (!alertsCheckInterval) { alertsCheckInterval = setInterval(checkAlerts, 60000); console.log("✅ Price alert checker started."); }
+    if (!dailyJobsInterval) { dailyJobsInterval = setInterval(runDailyJobs, 3600000); console.log("✅ Daily jobs scheduler started."); }
+    try {
+        const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
+        if (domain) {
+            const webhookUrl = `https://${domain}`;
+            await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
+            console.log(`✅ Webhook set to: ${webhookUrl}`);
+        } else { console.warn("Webhook URL not found. Bot will run on polling."); }
+    } catch (e) { console.error("Failed to set webhook:", e); }
+});
