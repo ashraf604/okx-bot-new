@@ -1,6 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final & Fully Functional Version
-// This version includes all bug fixes and feature implementations.
+// OKX Advanced Analytics Bot - Final, Reviewed, & Fully Functional
 // =================================================================
 
 const express = require("express");
@@ -74,6 +73,7 @@ async function getPortfolio() {
         const res = await fetch(`${API_BASE_URL}/api/v5/account/balance`, { headers: getHeaders("GET", "/api/v5/account/balance") });
         const json = await res.json();
         if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` };
+
         const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
         const tickersJson = await tickersRes.json();
         const prices = {};
@@ -142,10 +142,9 @@ function createChartUrl(history) {
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
 }
 
-async function checkNewTrades() { /* الكود كما هو */ }
-async function checkAlerts() { /* الكود كما هو */ }
+async function checkNewTrades() { /* لم يتم تفعيل هذه الميزة بعد */ }
+async function checkAlerts() { /* لم يتم تفعيل هذه الميزة بعد */ }
 
-// ✅ **الحل 3 (جزء 1):** تفعيل دالة المهام اليومية
 async function runDailyJobs() {
     const settings = loadSettings();
     if (!settings.dailySummary) return;
@@ -153,10 +152,8 @@ async function runDailyJobs() {
     if (error) return console.error("Daily Summary Error:", error);
     const history = loadHistory();
     const date = new Date().toISOString().slice(0, 10);
-    // منع الحفظ المكرر في نفس اليوم
     if (history.length && history[history.length - 1].date === date) return;
     history.push({ date, total });
-    // الاحتفاظ بآخر 30 يوم فقط
     if (history.length > 30) history.shift();
     saveHistory(history);
     console.log(`[✅ Daily Summary]: ${date} - $${total.toFixed(2)}`);
@@ -186,6 +183,7 @@ bot.command("settings", async (ctx) => {
 
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
 bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
+
 bot.callbackQuery("view_alerts", async (ctx) => {
     await ctx.answerCallbackQuery();
     const alerts = loadAlerts().filter(a => a.active);
@@ -194,15 +192,14 @@ bot.callbackQuery("view_alerts", async (ctx) => {
     alerts.forEach(a => { msg += `- *ID:* \`${a.id}\`\n  العملة: ${a.instId}\n  الشرط: ${a.condition === '>' ? 'أعلى من' : 'أقل من'} ${a.price}\n\n`; });
     await ctx.reply(msg, { parse_mode: "Markdown" });
 });
+
 bot.callbackQuery("delete_alert", async (ctx) => { waitingState = 'delete_alert'; await ctx.answerCallbackQuery(); await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); });
 
-// ✅ **الحل 1:** تفعيل زر الملخص اليومي
 bot.callbackQuery("toggle_summary", async (ctx) => {
     const settings = loadSettings();
     settings.dailySummary = !settings.dailySummary;
     saveSettings(settings);
     await ctx.answerCallbackQuery({ text: `تم ${settings.dailySummary ? 'تفعيل' : 'إيقاف'} الملخص اليومي ✅` });
-    // تحديث الرسالة بنفسها لتعكس التغيير
     const updatedKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
@@ -210,12 +207,10 @@ bot.callbackQuery("toggle_summary", async (ctx) => {
     await ctx.editMessageReplyMarkup({ reply_markup: updatedKeyboard });
 });
 
-// ✅ **الحل 2 (جزء 1):** تفعيل زر حذف البيانات مع طلب تأكيد
 bot.callbackQuery("delete_all_data", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply("⚠️ هل أنت متأكد من حذف كل البيانات؟ هذا الإجراء لا يمكن التراجع عنه.\n\nأرسل كلمة `تأكيد` خلال 30 ثانية.", { parse_mode: "Markdown" });
     waitingState = 'confirm_delete_all';
-    // إلغاء الحالة بعد 30 ثانية إذا لم يرد المستخدم
     setTimeout(() => {
         if (waitingState === 'confirm_delete_all') {
             waitingState = null;
@@ -223,13 +218,11 @@ bot.callbackQuery("delete_all_data", async (ctx) => {
     }, 30000);
 });
 
-
 // === المعالج الشامل للرسائل النصية ===
 bot.on("message:text", async (ctx) => {
     if (ctx.from.id !== AUTHORIZED_USER_ID) return;
     const text = ctx.message.text.trim();
 
-    // --- 1. التعامل مع الأوامر المباشرة (أزرار الواجهة الرئيسية) ---
     switch (text) {
         case "📊 عرض المحفظة":
             await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
@@ -239,7 +232,6 @@ bot.on("message:text", async (ctx) => {
             const msg = formatPortfolioMsg(assets, total, capital);
             return await ctx.reply(msg, { parse_mode: "Markdown" });
 
-        // ✅ **الحل 3 (جزء 2):** تحسين عرض أداء المحفظة
         case "📈 أداء المحفظة":
             const history = loadHistory();
             if (history.length < 2) {
@@ -279,7 +271,6 @@ bot.on("message:text", async (ctx) => {
             return bot.api.sendMessage(ctx.from.id, "/settings");
     }
 
-    // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
     if (waitingState) {
         switch (waitingState) {
             case 'set_capital':
@@ -325,8 +316,6 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`✅ تم حذف التنبيه \`${alertId}\` بنجاح.`);
                 }
                 break;
-
-            // ✅ **الحل 2 (جزء 2):** تنفيذ الحذف بعد التأكيد
             case 'confirm_delete_all':
                 if (text.toLowerCase() === 'تأكيد') {
                     saveCapital(0);
@@ -340,7 +329,7 @@ bot.on("message:text", async (ctx) => {
                 }
                 break;
         }
-        waitingState = null; // إعادة تعيين الحالة بعد المعالجة
+        waitingState = null;
     }
 });
 
@@ -351,7 +340,6 @@ app.use(webhookCallback(bot, "express"));
 app.listen(PORT, async () => {
     console.log(`✅ Bot running on port ${PORT}`);
     if (!alertsCheckInterval) { alertsCheckInterval = setInterval(checkAlerts, 60000); console.log("✅ Price alert checker started."); }
-    // تم تغيير الفاصل الزمني للمهام اليومية إلى ساعة واحدة (3600000 ميلي ثانية) ليكون منطقياً أكثر
     if (!dailyJobsInterval) { dailyJobsInterval = setInterval(runDailyJobs, 3600000); console.log("✅ Daily jobs scheduler started."); }
     try {
         const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
