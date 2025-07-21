@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - Final, Meticulously Reviewed Version
+// OKX Advanced Analytics Bot - v3 (Syntax Fixed & Organized)
 // =================================================================
 
 const express = require("express");
@@ -16,17 +16,13 @@ const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 
-// --- ملفات تخزين البيانات ---
+// --- ملفات تخزين البيانات (داخل مجلد data) ---
 const DATA_DIR = "./data";
-if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR);
-}
 const CAPITAL_FILE = `${DATA_DIR}/data_capital.json`;
 const ALERTS_FILE = `${DATA_DIR}/data_alerts.json`;
 const TRADES_FILE = `${DATA_DIR}/data_trades.json`;
 const HISTORY_FILE = `${DATA_DIR}/data_history.json`;
 const SETTINGS_FILE = `${DATA_DIR}/data_settings.json`;
-
 
 // --- متغيرات الحالة والمؤشرات ---
 let waitingState = null;
@@ -38,13 +34,17 @@ let dailyJobsInterval = null;
 
 function readJsonFile(filePath, defaultValue) {
     try {
-        if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath));
+        if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         return defaultValue;
     } catch (error) { console.error(`Error reading ${filePath}:`, error); return defaultValue; }
 }
 
 function writeJsonFile(filePath, data) {
     try {
+        // تأكد من أن المجلد موجود قبل الكتابة
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR);
+        }
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     } catch (error) { console.error(`Error writing to ${filePath}:`, error); }
 }
@@ -147,12 +147,8 @@ function createChartUrl(history) {
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
 }
 
-// ==========================================================
-// START: دالة مراقبة الصفقات المعدلة والمحسنة
-// ==========================================================
 async function checkNewTrades(isManualTrigger = false) {
     try {
-        // عند التشغيل اليدوي، أرسل رسالة للمستخدم
         if (isManualTrigger) {
             await bot.api.sendMessage(AUTHORIZED_USER_ID, "🔍 جار التحقق من وجود صفقات جديدة...");
         }
@@ -161,18 +157,15 @@ async function checkNewTrades(isManualTrigger = false) {
         const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
         const json = await res.json();
 
-        // تحقق من وجود خطأ في الاستجابة من المنصة
         if (json.code !== '0') {
             const errorMessage = `❌ فشل جلب سجل الصفقات من OKX.\nالسبب: ${json.msg || 'استجابة غير معروفة'}`;
             console.error(errorMessage);
-            // أبلغ المستخدم بالخطأ فقط عند التشغيل اليدوي لتجنب إرسال رسائل متكررة
             if (isManualTrigger) {
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, errorMessage);
             }
             return;
         }
 
-        // تحقق مما إذا كانت البيانات فارغة
         if (!json.data || json.data.length === 0) {
             if (isManualTrigger) {
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, "✅ لا توجد أي صفقات جديدة مكتملة في السجل الحديث.");
@@ -184,7 +177,6 @@ async function checkNewTrades(isManualTrigger = false) {
         let newTradesFound = false;
         let notificationsSent = 0;
 
-        // اعكس ترتيب الصفقات لمعالجتها من الأقدم إلى الأحدث
         for (const trade of json.data.reverse()) {
             if (!lastTrades[trade.ordId]) {
                 newTradesFound = true;
@@ -197,7 +189,6 @@ async function checkNewTrades(isManualTrigger = false) {
                 const sz = parseFloat(trade.sz);
                 const fee = parseFloat(trade.fee);
 
-                // منطق تحديد البيع الكلي أو الجزئي
                 if (trade.side === 'sell') {
                     const balancePath = `/api/v5/account/balance?ccy=${ccy}`;
                     try {
@@ -211,7 +202,7 @@ async function checkNewTrades(isManualTrigger = false) {
                         else { side = 'بيع جزئي 🔴'; }
                     } catch (e) {
                          console.error(`Error checking balance for ${ccy}, defaulting to 'بيع' side.`, e);
-                         side = 'بيع 🔴'; // fallback
+                         side = 'بيع 🔴';
                     }
                 }
 
@@ -251,10 +242,6 @@ async function checkNewTrades(isManualTrigger = false) {
         }
     }
 }
-// ==========================================================
-// END: دالة مراقبة الصفقات المعدلة والمحسنة
-// ==========================================================
-
 
 async function checkAlerts() {
     const alerts = loadAlerts();
@@ -335,11 +322,8 @@ bot.command("pnl", async (ctx) => {
     const sellPrice = parseFloat(args[1]);
     const quantity = parseFloat(args[2]);
 
-    if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity)) {
-        return await ctx.reply("❌ *خطأ:* تأكد من أن جميع القيم التي أدخلتها هي أرقام صالحة.");
-    }
-    if (buyPrice <= 0) {
-        return await ctx.reply("❌ *خطأ:* سعر الشراء يجب أن يكون أكبر من صفر لحساب النسبة بشكل صحيح.");
+    if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) {
+        return await ctx.reply("❌ *خطأ:* تأكد من أن جميع القيم التي أدخلتها هي أرقام موجبة وصالحة.");
     }
 
     const totalInvestment = buyPrice * quantity;
@@ -363,7 +347,7 @@ bot.command("pnl", async (ctx) => {
 });
 
 // === معالجات الأزرار المضمنة (Inline Keyboard) ===
-bot.callbackQuery("set_capital", async (ctx) => { waitingState = 'set_capital'; await ctx.answerCallbackQuery(); await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
+bot.callbackQuery("set_capital", async (ctx) => { await ctx.answerCallbackQuery(); waitingState = 'set_capital'; await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); });
 
 bot.callbackQuery("view_alerts", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -374,7 +358,7 @@ bot.callbackQuery("view_alerts", async (ctx) => {
     await ctx.reply(msg, { parse_mode: "Markdown" });
 });
 
-bot.callbackQuery("delete_alert", async (ctx) => { waitingState = 'delete_alert'; await ctx.answerCallbackQuery(); await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); });
+bot.callbackQuery("delete_alert", async (ctx) => { await ctx.answerCallbackQuery(); waitingState = 'delete_alert'; await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); });
 
 bot.callbackQuery("toggle_summary", async (ctx) => {
     const settings = loadSettings();
@@ -390,9 +374,9 @@ bot.callbackQuery("toggle_summary", async (ctx) => {
 
 bot.callbackQuery("delete_all_data", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply("⚠️ هل أنت متأكد من حذف كل البيانات؟ هذا الإجراء لا يمكن التراجع عنه.\n\nأرسل كلمة `تأكيد` خلال 30 ثانية.", { parse_mode: "Markdown" });
     waitingState = 'confirm_delete_all';
-    setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000);
+    await ctx.reply("⚠️ هل أنت متأكد من حذف كل البيانات؟ هذا الإجراء لا يمكن التراجع عنه.\n\nأرسل كلمة `تأكيد` خلال 30 ثانية.", { parse_mode: "Markdown" });
+    setTimeout(() => { if (waitingState === 'confirm_delete_all') { waitingState = null; } }, 30000);
 });
 
 // === المعالج الشامل للرسائل النصية ===
@@ -420,3 +404,146 @@ bot.on("message:text", async (ctx) => {
             const percent = previous > 0 ? (diff / previous) * 100 : 0;
             const summary = `*تغير آخر يوم:*\n${diff >= 0 ? '🟢' : '🔴'} $${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
             return await ctx.replyWithPhoto(chartUrl, { caption: `أداء محفظتك خلال الأيام السبعة الماضية.\n\n${summary}`, parse_mode: "Markdown" });
+
+        case "ℹ️ معلومات عملة":
+            waitingState = 'coin_info';
+            return await ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT).");
+        
+        case "🧮 حاسبة الربح والخسارة":
+            return await ctx.reply(
+                "لحساب الربح أو الخسارة، استخدم الأمر `/pnl` بالشكل التالي:\n\n" +
+                "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" +
+                "*مثال:*\n`/pnl 100 120 0.5`",
+                { parse_mode: "Markdown" }
+            );
+
+        case "🔔 ضبط تنبيه":
+            waitingState = 'set_alert';
+            return await ctx.reply("📝 *أرسل تفاصيل التنبيه:*\n`SYMBOL > PRICE` أو `SYMBOL < PRICE`", { parse_mode: "Markdown" });
+
+        case "👁️ مراقبة الصفقات":
+            if (!tradeMonitoringInterval) {
+                await checkNewTrades(true); 
+                tradeMonitoringInterval = setInterval(() => checkNewTrades(false), 60000); 
+                return await ctx.reply("✅ تم تشغيل مراقبة الصفقات الجديدة. سيتم التحقق كل دقيقة.");
+            } else {
+                clearInterval(tradeMonitoringInterval);
+                tradeMonitoringInterval = null;
+                return await ctx.reply("🛑 تم إيقاف مراقبة الصفقات الجديدة.");
+            }
+
+        case "⚙️ الإعدادات":
+            return bot.api.sendMessage(ctx.from.id, "/settings");
+    }
+
+    // --- 2. التعامل مع المدخلات بناءً على الحالة (waitingState) ---
+    if (waitingState) {
+        const state = waitingState;
+        waitingState = null; 
+        switch (state) {
+            case 'set_capital':
+                const amount = parseFloat(text);
+                if (!isNaN(amount) && amount >= 0) {
+                    saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`);
+                } else { await ctx.reply("❌ مبلغ غير صالح."); }
+                break;
+            case 'coin_info':
+                const { error, ...details } = await getInstrumentDetails(text);
+                if (error) { await ctx.reply(`❌ ${error}`); }
+                else {
+                    let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n`;
+                    msg += `- *السعر الحالي:* \`$${details.price}\`\n`;
+                    msg += `- *أعلى سعر (24س):* \`$${details.high24h}\`\n`;
+                    msg += `- *أدنى سعر (24س):* \`$${details.low24h}\`\n`;
+                    msg += `- *حجم التداول (24س):* \`${details.vol24h.toFixed(2)} ${text.split('-')[0]}\``;
+                    await ctx.reply(msg, { parse_mode: "Markdown" });
+                }
+                break;
+            case 'set_alert':
+                const parts = text.trim().split(/\s+/);
+                if (parts.length !== 3) {
+                    await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL > PRICE`");
+                    break;
+                }
+
+                const [instId, condition, priceStr] = parts;
+                const price = parseFloat(priceStr);
+
+                if (!['>', '<'].includes(condition) || isNaN(price)) {
+                    await ctx.reply("❌ صيغة غير صحيحة. الشرط يجب أن يكون `>` أو `<` والسعر يجب أن يكون رقماً.");
+                    break;
+                }
+
+                const alerts = loadAlerts();
+                const newAlert = {
+                    id: crypto.randomBytes(4).toString('hex'),
+                    instId: instId.toUpperCase(),
+                    condition: condition,
+                    price: price,
+                    active: true,
+                    createdAt: new Date().toISOString()
+                };
+                alerts.push(newAlert);
+                saveAlerts(alerts);
+                await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nID: \`${newAlert.id}\`\nسيتم إعلامك عندما يصبح سعر ${newAlert.instId} ${newAlert.condition === '>' ? 'أعلى من' : 'أقل من'} ${newAlert.price}`);
+                break;
+            
+            case 'delete_alert':
+                const alertIdToDelete = text;
+                const currentAlerts = loadAlerts();
+                const filteredAlerts = currentAlerts.filter(a => a.id !== alertIdToDelete);
+                if (currentAlerts.length === filteredAlerts.length) {
+                    await ctx.reply(`❌ لم يتم العثور على تنبيه بالـ ID: \`${alertIdToDelete}\``);
+                } else {
+                    saveAlerts(filteredAlerts);
+                    await ctx.reply(`✅ تم حذف التنبيه بالـ ID: \`${alertIdToDelete}\` بنجاح.`);
+                }
+                break;
+            
+            case 'confirm_delete_all':
+                if (text.toLowerCase() === 'تأكيد') {
+                    if (fs.existsSync(CAPITAL_FILE)) fs.unlinkSync(CAPITAL_FILE);
+                    if (fs.existsSync(ALERTS_FILE)) fs.unlinkSync(ALERTS_FILE);
+                    if (fs.existsSync(TRADES_FILE)) fs.unlinkSync(TRADES_FILE);
+                    if (fs.existsSync(HISTORY_FILE)) fs.unlinkSync(HISTORY_FILE);
+                    if (fs.existsSync(SETTINGS_FILE)) fs.unlinkSync(SETTINGS_FILE);
+                    await ctx.reply("🔥 تم حذف جميع البيانات والإعدادات بنجاح.");
+                } else {
+                    await ctx.reply("🛑 تم إلغاء عملية الحذف.");
+                }
+                break;
+        }
+    }
+});
+
+// === بدء تشغيل البوت والمهام المجدولة ===
+async function startBot() {
+    try {
+        console.log("Bot is starting...");
+        
+        // تأكد من وجود مجلد البيانات
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR);
+            console.log("Created data directory.");
+        }
+
+        // بدء المهام المجدولة
+        alertsCheckInterval = setInterval(checkAlerts, 60000); // كل دقيقة
+        dailyJobsInterval = setInterval(runDailyJobs, 60 * 60 * 1000); // كل ساعة
+        
+        // بدء تشغيل الخادم لاستقبال الـ webhooks
+        app.use(express.json());
+        app.use(webhookCallback(bot, "express"));
+        
+        app.listen(PORT, () => {
+            console.log(`Bot server listening on port ${PORT}`);
+        });
+
+        console.log("Bot started successfully.");
+    } catch (error) {
+        console.error("FATAL: Failed to start the bot.", error);
+    }
+}
+
+startBot();
+
