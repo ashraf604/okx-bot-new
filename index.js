@@ -434,20 +434,4 @@ bot.on("message:text", async (ctx) => {
     }
 });
 
-// === Server Startup ===
-app.use(express.json());
-app.use(webhookCallback(bot, "express"));
-
-app.listen(PORT, async () => {
-    console.log(`✅ Bot running on port ${PORT}`);
-    if (!alertsCheckInterval) { alertsCheckInterval = setInterval(checkAlerts, 60000); console.log("✅ Price alert checker started."); }
-    if (!dailyJobsInterval) { dailyJobsInterval = setInterval(runDailyJobs, 3600000); console.log("✅ Daily jobs scheduler started."); }
-    try {
-        const domain = process.env.RAILWAY_STATIC_URL || process.env.RENDER_EXTERNAL_URL;
-        if (domain) {
-            const webhookUrl = `https://${domain}`;
-            await bot.api.setWebhook(webhookUrl, { drop_pending_updates: true });
-            console.log(`✅ Webhook set to: ${webhookUrl}`);
-        } else { console.warn("Webhook URL not found. Bot will run on polling."); }
-    } catch (e) { console.error("Failed to set webhook:", e); }
-});
+// === Server 
