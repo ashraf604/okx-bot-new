@@ -1,5 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v17 (Final Build, Syntax Corrected)
+// OKX Advanced Analytics Bot - v18 (Final Stable Build)
+// =================================================================
+// هذا الإصدار يستخدم طريقة جلب الرصيد الأصلية والمُجربة مع كل الميزات الجديدة.
 // =================================================================
 
 const express = require("express");
@@ -110,6 +112,8 @@ async function getMarketPrices() {
         return prices;
     } catch (error) { console.error("Exception in getMarketPrices:", error); return null; }
 }
+
+// --- تم إرجاع هذه الدوال إلى حالتها الأصلية التي كانت تعمل ---
 async function getPortfolio(prices) {
     try {
         const path = "/api/v5/account/balance";
@@ -151,6 +155,8 @@ async function getBalanceForComparison() {
         return balanceMap;
     } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; }
 }
+// --- نهاية الدوال التي تم إرجاعها لحالتها الأصلية ---
+
 async function monitorBalanceChanges() {
     const currentBalance = await getBalanceForComparison();
     const prices = await getMarketPrices();
