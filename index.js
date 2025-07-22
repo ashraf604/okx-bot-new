@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v16 (Final Privacy-Aware Version)
+// OKX Advanced Analytics Bot - v16.1 (Final & Corrected)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية مع فصل كامل بين البيانات الخاصة والعامة.
+// هذا الإصدار هو النسخة النهائية مع تصحيح الخطأ المطبعي.
 // =================================================================
 
 const express = require("express");
@@ -391,5 +391,18 @@ bot.on("message:text", async (ctx) => {
         const state = waitingState;
         waitingState = null;
         switch (state) {
-            case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`); } else { await ctx.reply("❌ مبلغ غير صالح."); } return;
-            case 'coin_info': const { error, ...details } = await getInstrumentDetails(text); if (error) { await ctx.reply(`❌ ${error}`); } else { let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n- *السعر الحالي:* \`$${details.price}\`\n- *أعلى سعر (24س):* \`$${details.high24h}\`\n- *أدنى سعر (24س):* \`$${details.low24h}\`\n- *حجم التداول (24س)
+            case 'set_capital':
+                const amount = parseFloat(text);
+                if (!isNaN(amount) && amount >= 0) {
+                    saveCapital(amount);
+                    await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`);
+                } else {
+                    await ctx.reply("❌ مبلغ غير صالح.");
+                }
+                return;
+            case 'coin_info':
+                const { error, ...details } = await getInstrumentDetails(text);
+                if (error) {
+                    await ctx.reply(`❌ ${error}`);
+                } else {
+                
