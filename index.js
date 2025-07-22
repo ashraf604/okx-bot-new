@@ -1,8 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v14 (Final Master Reviewed)
+// OKX Advanced Analytics Bot - v16 (Final Privacy-Aware Version)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية المعتمدة بعد المراجعة الشاملة.
-// الكود مكتمل، مستقر، ويحتوي على جميع الميزات المطلوبة.
+// هذا الإصدار هو النسخة النهائية مع فصل كامل بين البيانات الخاصة والعامة.
 // =================================================================
 
 const express = require("express");
@@ -53,7 +52,10 @@ const loadAlerts = () => readJsonFile(ALERTS_FILE, []);
 const saveAlerts = (alerts) => writeJsonFile(ALERTS_FILE, alerts);
 const loadHistory = () => readJsonFile(HISTORY_FILE, []);
 const saveHistory = (history) => writeJsonFile(HISTORY_FILE, history);
-const loadSettings = () => readJsonFile(SETTINGS_FILE, { dailySummary: false });
+const loadSettings = () => readJsonFile(SETTINGS_FILE, {
+    dailySummary: false,
+    autoPostToChannel: false
+});
 const saveSettings = (settings) => writeJsonFile(SETTINGS_FILE, settings);
 
 // === دوال API ===
@@ -155,24 +157,17 @@ async function monitorBalanceChanges() {
     const currentBalance = await getBalanceForComparison();
     const prices = await getMarketPrices();
 
-    if (!currentBalance || !prices) {
-        console.error("Could not fetch balance or prices. Skipping this monitoring cycle.");
-        return;
-    }
-
+    if (!currentBalance || !prices) { return; }
     if (Object.keys(previousBalanceState).length === 0) {
         previousBalanceState = currentBalance;
-        console.log("Initial balance state captured. Monitoring will start on the next cycle.");
         return;
     }
 
     const { total: newTotalPortfolioValue } = await getPortfolio(prices);
-    if (newTotalPortfolioValue === undefined) {
-        console.error("Could not calculate new total portfolio value.");
-        return;
-    }
+    if (newTotalPortfolioValue === undefined) { return; }
 
     const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
+    const settings = loadSettings();
 
     for (const asset of allAssets) {
         if (asset === 'USDT') continue;
@@ -188,33 +183,46 @@ async function monitorBalanceChanges() {
 
         const tradeValue = Math.abs(difference) * price;
         const avgPrice = tradeValue / Math.abs(difference);
-        const remainingCash = currentBalance['USDT'] || 0;
+        const type = difference > 0 ? 'شراء' : 'بيع';
+        const typeEmoji = difference > 0 ? '🟢' : '🔴';
         const newAssetValue = currAmount * price;
         const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
-        const cashPercentage = newTotalPortfolioValue > 0 ? (remainingCash / newTotalPortfolioValue) * 100 : 0;
 
-        let notification = "🔔 *تنبيه بصفقة جديدة*\n\n";
+        // --- 1. بناء الرسالة العامة والآمنة (للقناة) ---
+        const publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` +
+                                     `*العملة:* \`${asset}/USDT\`\n` +
+                                     `*متوسط سعر الدخول:* ~ $${avgPrice.toFixed(4)}\n` +
+                                     `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
 
-        if (difference > 0) {
-            notification += `🟢 *شراء ${asset}*` +
-                          `\n- **الكمية:** \`${difference.toFixed(6)}\`` +
-                          `\n- **متوسط السعر:** \`~ $${avgPrice.toFixed(4)}\`` +
-                          `\n- **قيمة الصفقة:** \`~ $${tradeValue.toFixed(2)}\``;
+        if (settings.autoPostToChannel) {
+            // --- في حال النشر التلقائي: أرسل الرسالة العامة مباشرة ---
+            await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
         } else {
-            notification += `🔴 *بيع ${asset}*` +
-                          `\n- **الكمية:** \`${Math.abs(difference).toFixed(6)}\`` +
-                          `\n- **متوسط السعر:** \`~ $${avgPrice.toFixed(4)}\`` +
-                          `\n- **قيمة الصفقة:** \`~ $${tradeValue.toFixed(2)}\``;
+            // --- في حال طلب التأكيد: أرسل لك رسالة خاصة بكل التفاصيل ---
+            const remainingCash = currentBalance['USDT'] || 0;
+            
+            const privateInfoText = `*تفاصيل خاصة بك:*\n` +
+                                    `- الكاش المتبقي: $${remainingCash.toFixed(2)}`;
+
+            const confirmationText = `*صفقة جديدة مكتشفة*\n\n`+
+                                   `*سيتم نشر التالي في القناة:*\n`+
+                                   `--------------------\n`+
+                                   `${publicRecommendationText}\n` +
+                                   `--------------------\n\n` +
+                                   `${privateInfoText}\n\n` +
+                                   `*هل تريد المتابعة والنشر؟*`;
+            
+            const callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${type}`;
+            const confirmationKeyboard = new InlineKeyboard()
+                .text("✅ نعم، انشر", callbackData)
+                .text("❌ تجاهل", "ignore_trade");
+
+            await bot.api.sendMessage(AUTHORIZED_USER_ID, confirmationText, {
+                parse_mode: "Markdown",
+                reply_markup: confirmationKeyboard
+            });
         }
-
-        notification += `\n\n---\n📊 *الوضع بعد الصفقة:*` +
-                      `\n- **نسبة العملة من المحفظة:** \`${portfolioPercentage.toFixed(2)}%\`` +
-                      `\n- **الكاش المتبقي (USDT):** \`$${remainingCash.toFixed(2)}\`` +
-                      `\n- **نسبة الكاش من المحفظة:** \`${cashPercentage.toFixed(2)}%\``;
-
-        await bot.api.sendMessage(AUTHORIZED_USER_ID, notification, { parse_mode: "Markdown" });
     }
-
     previousBalanceState = currentBalance;
 }
 async function getInstrumentDetails(instId) {
@@ -277,8 +285,13 @@ async function sendSettingsMenu(ctx) {
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
+        .text(`🚀 النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").row()
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
-    await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", { parse_mode: "Markdown", reply_markup: settingsKeyboard });
+
+    await ctx.reply("⚙️ *لوحة التحكم والإعدادات*:", {
+        parse_mode: "Markdown",
+        reply_markup: settingsKeyboard
+    });
 }
 bot.use(async (ctx, next) => {
     if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); }
@@ -302,21 +315,68 @@ bot.command("pnl", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
+
+    if (data.startsWith("publish_")) {
+        const [, asset, priceStr, percentageStr, type] = data.split('_');
+        const typeEmoji = type === 'شراء' ? '🟢' : '🔴';
+
+        const finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` +
+                                 `*العملة:* \`${asset}/USDT\`\n` +
+                                 `*متوسط سعر الدخول:* ~ $${priceStr}\n` +
+                                 `*تمثل الآن:* \`${percentageStr}%\` *من المحفظة*`;
+
+        try {
+            await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, finalRecommendation, { parse_mode: "Markdown" });
+            await ctx.editMessageText("✅ تم نشر التوصية بنجاح في القناة.");
+        } catch (e) {
+            console.error("Failed to post to channel:", e);
+            await ctx.editMessageText("❌ فشل إرسال التوصية. تأكد من أن البوت مشرف في القناة وأن الـ ID صحيح.");
+        }
+        return;
+    }
+
+    if (data === "ignore_trade") {
+        await ctx.editMessageText("👍 تم تجاهل الصفقة.");
+        return;
+    }
+
     switch (data) {
-        case "set_capital": waitingState = 'set_capital'; await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); break;
+        case "set_capital":
+            waitingState = 'set_capital';
+            await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال.");
+            break;
         case "view_alerts":
             const alerts = loadAlerts();
-            if (alerts.length === 0) return ctx.reply("ℹ️ لا توجد تنبيهات نشطة حاليًا.");
+            if (alerts.length === 0) {
+                await ctx.reply("ℹ️ لا توجد تنبيهات نشطة حاليًا.");
+                return;
+            }
             let msg = "🔔 *قائمة التنبيهات النشطة:*\n\n";
             alerts.forEach(a => { msg += `- *ID:* \`${a.id}\`\n  العملة: ${a.instId}\n  الشرط: ${a.condition === '>' ? 'أعلى من' : 'أقل من'} ${a.price}\n\n`; });
             await ctx.reply(msg, { parse_mode: "Markdown" });
             break;
-        case "delete_alert": waitingState = 'delete_alert'; await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); break;
+        case "delete_alert":
+            waitingState = 'delete_alert';
+            await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه.");
+            break;
         case "toggle_summary":
-            const settings = loadSettings();
-            settings.dailySummary = !settings.dailySummary;
-            saveSettings(settings);
-            await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row().text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row().text("🔥 حذف كل البيانات 🔥", "delete_all_data") });
+        case "toggle_autopost":
+            {
+                const settings = loadSettings();
+                if (data === 'toggle_summary') {
+                    settings.dailySummary = !settings.dailySummary;
+                } else if (data === 'toggle_autopost') {
+                    settings.autoPostToChannel = !settings.autoPostToChannel;
+                }
+                saveSettings(settings);
+                
+                const updatedKeyboard = new InlineKeyboard()
+                    .text("💰 تعيين رأس المال", "set_capital").text("📄 عرض التنبيهات", "view_alerts").row()
+                    .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
+                    .text(`🚀 النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").row()
+                    .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
+                await ctx.editMessageReplyMarkup({ reply_markup: updatedKeyboard });
+            }
             break;
         case "delete_all_data":
             waitingState = 'confirm_delete_all';
@@ -332,75 +392,4 @@ bot.on("message:text", async (ctx) => {
         waitingState = null;
         switch (state) {
             case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { saveCapital(amount); await ctx.reply(`✅ تم تحديث رأس المال إلى: $${amount.toFixed(2)}`); } else { await ctx.reply("❌ مبلغ غير صالح."); } return;
-            case 'coin_info': const { error, ...details } = await getInstrumentDetails(text); if (error) { await ctx.reply(`❌ ${error}`); } else { let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n- *السعر الحالي:* \`$${details.price}\`\n- *أعلى سعر (24س):* \`$${details.high24h}\`\n- *أدنى سعر (24س):* \`$${details.low24h}\`\n- *حجم التداول (24س):* \`${details.vol24h.toFixed(2)} ${text.split('-')[0]}\``; await ctx.reply(msg, { parse_mode: "Markdown" }); } return;
-            case 'set_alert':
-                const parts = text.trim().split(/\s+/);
-                if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL > PRICE`");
-                const [instId, condition, priceStr] = parts;
-                const price = parseFloat(priceStr);
-                if (!['>', '<'].includes(condition) || isNaN(price)) return await ctx.reply("❌ صيغة غير صحيحة. الشرط يجب أن يكون `>` أو `<` والسعر يجب أن يكون رقماً.");
-                const alerts = loadAlerts();
-                const newAlert = { id: crypto.randomBytes(4).toString('hex'), instId: instId.toUpperCase(), condition, price };
-                alerts.push(newAlert);
-                saveAlerts(alerts);
-                await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nID: \`${newAlert.id}\`\nسيتم إعلامك عندما يصبح سعر ${newAlert.instId} ${newAlert.condition === '>' ? 'أعلى من' : 'أقل من'} ${newAlert.price}`);
-                return;
-            case 'delete_alert': const currentAlerts = loadAlerts(); const filteredAlerts = currentAlerts.filter(a => a.id !== text); if (currentAlerts.length === filteredAlerts.length) { await ctx.reply(`❌ لم يتم العثور على تنبيه بالـ ID: \`${text}\``); } else { saveAlerts(filteredAlerts); await ctx.reply(`✅ تم حذف التنبيه بالـ ID: \`${text}\` بنجاح.`); } return;
-            case 'confirm_delete_all': if (text.toLowerCase() === 'تأكيد') { if (fs.existsSync(CAPITAL_FILE)) fs.unlinkSync(CAPITAL_FILE); if (fs.existsSync(ALERTS_FILE)) fs.unlinkSync(ALERTS_FILE); if (fs.existsSync(HISTORY_FILE)) fs.unlinkSync(HISTORY_FILE); if (fs.existsSync(SETTINGS_FILE)) fs.unlinkSync(SETTINGS_FILE); await ctx.reply("🔥 تم حذف جميع البيانات والإعدادات بنجاح."); } else { await ctx.reply("🛑 تم إلغاء عملية الحذف."); } return;
-        }
-    }
-    switch (text) {
-        case "📊 عرض المحفظة":
-            await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
-            const prices = await getMarketPrices();
-            if (!prices) return await ctx.reply("❌ فشل في جلب أسعار السوق.");
-            const { assets, total, error } = await getPortfolio(prices);
-            if (error) return await ctx.reply(`❌ ${error}`);
-            const capital = loadCapital();
-            const portfolioMsg = formatPortfolioMsg(assets, total, capital);
-            await ctx.reply(portfolioMsg, { parse_mode: "Markdown" });
-            break;
-        case "📈 أداء المحفظة":
-            const history = loadHistory();
-            if (history.length < 2) return await ctx.reply("ℹ️ لا توجد بيانات كافية. يرجى تفعيل الملخص اليومي والانتظار ليوم واحد على الأقل.");
-            const chartUrl = createChartUrl(history);
-            if (!chartUrl) return await ctx.reply("ℹ️ لا توجد بيانات كافية لرسم المخطط.");
-            const latest = history[history.length - 1]?.total || 0;
-            const previous = history.length > 1 ? history[history.length - 2]?.total : latest;
-            const diff = latest - previous;
-            const percent = previous > 0 ? (diff / previous) * 100 : 0;
-            const summary = `*تغير آخر يوم:*\n${diff >= 0 ? '🟢' : '🔴'} $${diff.toFixed(2)} (${percent.toFixed(2)}%)`;
-            await ctx.replyWithPhoto(chartUrl, { caption: `أداء محفظتك خلال الأيام السبعة الماضية.\n\n${summary}`, parse_mode: "Markdown" });
-            break;
-        case "ℹ️ معلومات عملة": waitingState = 'coin_info'; await ctx.reply("ℹ️ أرسل رمز العملة (مثال: BTC-USDT)."); break;
-        case "🧮 حاسبة الربح والخسارة": await ctx.reply(" لحساب الربح أو الخسارة، استخدم الأمر `/pnl` بالشكل التالي:\n\n" + "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" + "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" }); break;
-        case "🔔 ضبط تنبيه": waitingState = 'set_alert'; await ctx.reply("📝 *أرسل تفاصيل التنبيه:*\n`SYMBOL > PRICE` أو `SYMBOL < PRICE`", { parse_mode: "Markdown" }); break;
-        case "👁️ مراقبة الصفقات":
-            if (!balanceMonitoringInterval) {
-                await ctx.reply("⏳ جارٍ إعداد المراقبة... سيتم أولاً جلب الرصيد الحالي كنقطة بداية.");
-                previousBalanceState = await getBalanceForComparison();
-                if (previousBalanceState === null) return await ctx.reply("❌ فشل في جلب الرصيد الأولي. لا يمكن بدء المراقبة.");
-                balanceMonitoringInterval = setInterval(monitorBalanceChanges, 20000);
-                await ctx.reply("✅ تم تشغيل مراقبة الصفقات. سيتم إعلامك بأي تغيير بالتفصيل.");
-            } else {
-                clearInterval(balanceMonitoringInterval);
-                balanceMonitoringInterval = null;
-                previousBalanceState = {};
-                await ctx.reply("🛑 تم إيقاف مراقبة الصفقات.");
-            }
-            break;
-        case "⚙️ الإعدادات": await sendSettingsMenu(ctx); break;
-    }
-});
-async function startBot() {
-    try {
-        console.log("Bot is starting with hyper-detailed notifications...");
-        alertsCheckInterval = setInterval(checkPriceAlerts, 60000);
-        dailyJobsInterval = setInterval(runDailyJobs, 3600000);
-        bot.catch((err) => { const ctx = err.ctx; console.error(`Error while handling update ${ctx.update.update_id}:`); console.error(err.error); });
-        await bot.start();
-        console.log("Bot started successfully.");
-    } catch (error) { console.error("FATAL: Failed to start the bot.", error); }
-}
-startBot();
-
+            case 'coin_info': const { error, ...details } = await getInstrumentDetails(text); if (error) { await ctx.reply(`❌ ${error}`); } else { let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n- *السعر الحالي:* \`$${details.price}\`\n- *أعلى سعر (24س):* \`$${details.high24h}\`\n- *أدنى سعر (24س):* \`$${details.low24h}\`\n- *حجم التداول (24س)
