@@ -1,7 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v16.1 (Final & Corrected)
-// =================================================================
-// هذا الإصدار هو النسخة النهائية مع تصحيح الخطأ المطبعي.
+// OKX Advanced Analytics Bot - v17 (Final Build, Syntax Corrected)
 // =================================================================
 
 const express = require("express");
@@ -188,17 +186,14 @@ async function monitorBalanceChanges() {
         const newAssetValue = currAmount * price;
         const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
 
-        // --- 1. بناء الرسالة العامة والآمنة (للقناة) ---
         const publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` +
                                      `*العملة:* \`${asset}/USDT\`\n` +
                                      `*متوسط سعر الدخول:* ~ $${avgPrice.toFixed(4)}\n` +
                                      `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
 
         if (settings.autoPostToChannel) {
-            // --- في حال النشر التلقائي: أرسل الرسالة العامة مباشرة ---
             await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
         } else {
-            // --- في حال طلب التأكيد: أرسل لك رسالة خاصة بكل التفاصيل ---
             const remainingCash = currentBalance['USDT'] || 0;
             
             const privateInfoText = `*تفاصيل خاصة بك:*\n` +
@@ -405,4 +400,112 @@ bot.on("message:text", async (ctx) => {
                 if (error) {
                     await ctx.reply(`❌ ${error}`);
                 } else {
-                
+                    let msg = `*ℹ️ معلومات ${text.toUpperCase()}*\n\n- *السعر الحالي:* \`$${details.price}\`\n- *أعلى سعر (24س):* \`$${details.high24h}\`\n- *أدنى سعر (24س):* \`$${details.low24h}\`\n- *حجم التداول (24س):* \`${details.vol24h.toFixed(2)} ${text.split('-')[0]}\``;
+                    await ctx.reply(msg, { parse_mode: "Markdown" });
+                }
+                return;
+            case 'set_alert':
+                const parts = text.trim().split(/\s+/);
+                if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL > PRICE`");
+                const [instId, condition, priceStr] = parts;
+                const price = parseFloat(priceStr);
+                if (!['>', '<'].includes(condition) || isNaN(price)) return await ctx.reply("❌ صيغة غير صحيحة. الشرط يجب أن يكون `>` أو `<` والسعر يجب أن يكون رقماً.");
+                const alerts = loadAlerts();
+                const newAlert = { id: crypto.randomBytes(4).toString('hex'), instId: instId.toUpperCase(), condition, price };
+                alerts.push(newAlert);
+                saveAlerts(alerts);
+                await ctx.reply(`✅ تم ضبط التنبيه بنجاح!\nID: \`${newAlert.id}\`\nسيتم إعلامك عندما يصبح سعر ${newAlert.instId} ${newAlert.condition === '>' ? 'أعلى من' : 'أقل من'} ${newAlert.price}`);
+                return;
+            case 'delete_alert':
+                const currentAlerts = loadAlerts();
+                const filteredAlerts = currentAlerts.filter(a => a.id !== text);
+                if (currentAlerts.length === filteredAlerts.length) {
+                    await ctx.reply(`❌ لم يتم العثور على تنبيه بالـ ID: \`${text}\``);
+                } else {
+                    saveAlerts(filteredAlerts);
+                    await ctx.reply(`✅ تم حذف التنبيه بالـ ID: \`${text}\` بنجاح.`);
+                }
+                return;
+            case 'confirm_delete_all':
+                if (text.toLowerCase() === 'تأكيد') {
+                    if (fs.existsSync(CAPITAL_FILE)) fs.unlinkSync(CAPITAL_FILE);
+                    if (fs.existsSync(ALERTS_FILE)) fs.unlinkSync(ALERTS_FILE);
+                    if (fs.existsSync(HISTORY_FILE)) fs.unlinkSync(HISTORY_FILE);
+                    if (fs.existsSync(SETTINGS_FILE)) fs.unlinkSync(SETTINGS_FILE);
+                    await ctx.reply("🔥 تم حذف جميع البيانات والإعدادات بنجاح.");
+                } else {
+                    await ctx.reply("🛑 تم إلغاء عملية الحذف.");
+                }
+                return;
+        }
+    }
+
+    switch (text) {
+        case "📊 عرض المحفظة":
+            await ctx.reply('⏳ لحظات... جار تحديث بيانات المحفظة.');
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ فشل في جلب أسعار السوق.");
+            const { assets, total, error } = await getPortfolio(prices);
+            if (error) {
+                await ctx.reply(`❌ ${error}`);
+            } else {
+                const capital = loadCapital();
+                const msg = formatPortfolioMsg(assets, total, capital);
+                await ctx.reply(msg, { parse_mode: "Markdown" });
+            }
+            break;
+        case "📈 أداء المحفظة":
+            const history = loadHistory();
+            if (history.length < 2) {
+                await ctx.reply("ℹ️ لا توجد بيانات كافية لعرض الأداء. سيتم تسجيل البيانات يوميًا.");
+            } else {
+                const chartUrl = createChartUrl(history);
+                await ctx.replyWithPhoto(chartUrl, { caption: "📊 *أداء المحفظة آخر 7 أيام*", parse_mode: "Markdown" });
+            }
+            break;
+        case "ℹ️ معلومات عملة":
+            waitingState = 'coin_info';
+            await ctx.reply("✍️ أرسل رمز العملة التي تريدها (مثال: `BTC-USDT`).");
+            break;
+        case "🔔 ضبط تنبيه":
+            waitingState = 'set_alert';
+            await ctx.reply("✍️ أرسل التنبيه بالصيغة التالية:\n`SYMBOL > PRICE`\n\n*مثال:*\n`BTC-USDT > 70000`");
+            break;
+        case "🧮 حاسبة الربح والخسارة":
+             await ctx.reply("يرجى استخدام الأمر مباشرة مع التفاصيل.\n" + "`/pnl <سعر الشراء> <سعر البيع> <الكمية>`\n\n" + "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" });
+            break;
+        case "👁️ مراقبة الصفقات":
+            await ctx.reply("ℹ️ *مراقبة الصفقات تعمل تلقائيًا في الخلفية.*\n\nعند اكتشاف أي صفقة شراء أو بيع في حسابك، سيتم إعلامك بناءً على إعداداتك الحالية (نشر تلقائي أو طلب تأكيد).", { parse_mode: "Markdown" });
+            break;
+        case "⚙️ الإعدادات":
+            await sendSettingsMenu(ctx);
+            break;
+        default:
+            await ctx.reply("لم أتعرف على هذا الأمر. يرجى استخدام الأزرار في القائمة.", { reply_markup: mainKeyboard });
+    }
+});
+
+// --- بدء تشغيل البوت ---
+async function startBot() {
+    console.log("Starting bot...");
+    previousBalanceState = await getBalanceForComparison() || {};
+    if (Object.keys(previousBalanceState).length > 0) {
+        console.log("Initial balance state loaded successfully.");
+    } else {
+        console.warn("Could not load initial balance. Monitoring might be inaccurate on the first cycle.");
+    }
+    
+    balanceMonitoringInterval = setInterval(monitorBalanceChanges, 1 * 60 * 1000);
+    alertsCheckInterval = setInterval(checkPriceAlerts, 5 * 60 * 1000);
+    dailyJobsInterval = setInterval(runDailyJobs, 60 * 60 * 1000);
+
+    app.use(express.json());
+    app.use(`/${bot.token}`, webhookCallback(bot, "express"));
+
+    app.listen(PORT, () => {
+        console.log(`Bot server listening on port ${PORT}`);
+        // bot.api.setWebhook(`YOUR_WEBHOOK_URL/${bot.token}`);
+    });
+}
+
+startBot().catch(err => console.error("Failed to start bot:", err));
