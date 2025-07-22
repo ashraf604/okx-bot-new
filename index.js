@@ -1,8 +1,8 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v6 (Final Reviewed Version)
+// OKX Advanced Analytics Bot - v8 (Final Reviewed Version)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية والمراجعة. تم تحسين هيكل الكود
-// لضمان الاستقرار والموثوقية، مع الحفاظ على جميع الميزات.
+// هذا الإصدار هو النسخة النهائية والمراجعة. تم التأكد من خلوه
+// من الأخطاء واحتوائه على جميع الميزات المطلوبة.
 // =================================================================
 
 const express = require("express");
@@ -126,7 +126,7 @@ async function getPortfolio() {
                 const instId = `${asset.ccy}-USDT`;
                 const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
                 const value = amount * price;
-                if (value >= 0.01) {
+                if (value >= 1) { // فلترة الأصول التي تقل قيمتها عن 1 دولار
                     assets.push({ asset: asset.ccy, price, value, amount });
                     total += value;
                 }
@@ -269,7 +269,6 @@ const mainKeyboard = new Keyboard()
     .text("🧮 حاسبة الربح والخسارة").row()
     .text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
 
-// دالة مخصصة لإرسال قائمة الإعدادات
 async function sendSettingsMenu(ctx) {
     const settings = loadSettings();
     const settingsKeyboard = new InlineKeyboard()
@@ -455,14 +454,13 @@ async function startBot() {
         alertsCheckInterval = setInterval(checkPriceAlerts, 60000);
         dailyJobsInterval = setInterval(runDailyJobs, 60 * 60 * 1000);
         
-        // اختر طريقة التشغيل المناسبة لك
         // 1. Webhook (للاستضافة على سيرفر)
-        app.use(express.json());
-        app.use(webhookCallback(bot, "express"));
-        app.listen(PORT, () => console.log(`Bot server listening on port ${PORT}`));
+        // app.use(express.json());
+        // app.use(webhookCallback(bot, "express"));
+        // app.listen(PORT, () => console.log(`Bot server listening on port ${PORT}`));
 
         // 2. Long Polling (للتشغيل المحلي على جهازك)
-        // await bot.start();
+        await bot.start();
 
         console.log("Bot started successfully.");
     } catch (error) {
