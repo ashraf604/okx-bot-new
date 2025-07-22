@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v19 (Diagnostic Mode Enabled)
+// OKX Advanced Analytics Bot - v20 (Final Persistent State)
 // =================================================================
-// هذا الإصدار يحتوي على أمر /debug لتشخيص مشكلة جلب الرصيد.
+// هذا الإصدار يضيف ذاكرة دائمة للرصيد لحل مشكلة فقدان الإشعارات بعد إعادة التشغيل.
 // =================================================================
 
 const express = require("express");
@@ -24,6 +24,7 @@ const CAPITAL_FILE = `${DATA_DIR}/data_capital.json`;
 const ALERTS_FILE = `${DATA_DIR}/data_alerts.json`;
 const HISTORY_FILE = `${DATA_DIR}/data_history.json`;
 const SETTINGS_FILE = `${DATA_DIR}/data_settings.json`;
+const BALANCE_STATE_FILE = `${DATA_DIR}/data_balance_state.json`; // <<< ملف الذاكرة الدائمة الجديد
 
 // --- متغيرات الحالة والمؤشرات ---
 let waitingState = null;
@@ -52,11 +53,10 @@ const loadAlerts = () => readJsonFile(ALERTS_FILE, []);
 const saveAlerts = (alerts) => writeJsonFile(ALERTS_FILE, alerts);
 const loadHistory = () => readJsonFile(HISTORY_FILE, []);
 const saveHistory = (history) => writeJsonFile(HISTORY_FILE, history);
-const loadSettings = () => readJsonFile(SETTINGS_FILE, {
-    dailySummary: false,
-    autoPostToChannel: false
-});
+const loadSettings = () => readJsonFile(SETTINGS_FILE, { dailySummary: false, autoPostToChannel: false });
 const saveSettings = (settings) => writeJsonFile(SETTINGS_FILE, settings);
+const loadBalanceState = () => readJsonFile(BALANCE_STATE_FILE, {}); // <<< دوال جديدة للذاكرة
+const saveBalanceState = (state) => writeJsonFile(BALANCE_STATE_FILE, state); // <<< دوال جديدة للذاكرة
 
 // === دوال API ===
 function getHeaders(method, path, body = "") {
@@ -155,16 +155,30 @@ async function getBalanceForComparison() {
 }
 async function monitorBalanceChanges() {
     const currentBalance = await getBalanceForComparison();
-    const prices = await getMarketPrices();
+    if (!currentBalance) {
+        console.error("Could not fetch current balance. Skipping monitoring cycle.");
+        return;
+    }
 
-    if (!currentBalance || !prices) { return; }
+    // إذا كانت الذاكرة فارغة (أول تشغيل على الإطلاق)، قم بتعبئتها والحفظ ثم الخروج
     if (Object.keys(previousBalanceState).length === 0) {
         previousBalanceState = currentBalance;
+        saveBalanceState(previousBalanceState);
+        console.log("Initial balance state captured and saved. Monitoring will start on the next cycle.");
+        return;
+    }
+
+    const prices = await getMarketPrices();
+    if (!prices) {
+        console.error("Could not fetch market prices. Skipping monitoring cycle.");
         return;
     }
 
     const { total: newTotalPortfolioValue } = await getPortfolio(prices);
-    if (newTotalPortfolioValue === undefined) { return; }
+    if (newTotalPortfolioValue === undefined) { 
+        console.error("Could not calculate new total portfolio value. Skipping monitoring cycle.");
+        return; 
+    }
 
     const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
     const settings = loadSettings();
@@ -197,18 +211,8 @@ async function monitorBalanceChanges() {
             await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
         } else {
             const remainingCash = currentBalance['USDT'] || 0;
-            
-            const privateInfoText = `*تفاصيل خاصة بك:*\n` +
-                                    `- الكاش المتبقي: $${remainingCash.toFixed(2)}`;
-
-            const confirmationText = `*صفقة جديدة مكتشفة*\n\n`+
-                                   `*سيتم نشر التالي في القناة:*\n`+
-                                   `--------------------\n`+
-                                   `${publicRecommendationText}\n` +
-                                   `--------------------\n\n` +
-                                   `${privateInfoText}\n\n` +
-                                   `*هل تريد المتابعة والنشر؟*`;
-            
+            const privateInfoText = `*تفاصيل خاصة بك:*\n- الكاش المتبقي: $${remainingCash.toFixed(2)}`;
+            const confirmationText = `*صفقة جديدة مكتشفة*\n\n*سيتم نشر التالي في القناة:*\n--------------------\n${publicRecommendationText}\n--------------------\n\n${privateInfoText}\n\n*هل تريد المتابعة والنشر؟*`;
             const callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${type}`;
             const confirmationKeyboard = new InlineKeyboard()
                 .text("✅ نعم، انشر", callbackData)
@@ -220,7 +224,10 @@ async function monitorBalanceChanges() {
             });
         }
     }
+    
+    // <<< التعديل الأهم: تحديث الذاكرة في المتغير وفي الملف >>>
     previousBalanceState = currentBalance;
+    saveBalanceState(previousBalanceState);
 }
 async function getInstrumentDetails(instId) {
     try {
@@ -290,29 +297,6 @@ async function sendSettingsMenu(ctx) {
         reply_markup: settingsKeyboard
     });
 }
-
-// --- أمر تشخيصي مؤقت ---
-bot.command("debug", async (ctx) => {
-    try {
-        await ctx.reply("⏳ جاري الآن طلب رصيدك من OKX... الرجاء الانتظار.");
-        const path = "/api/v5/account/balance";
-        const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
-        const json = await res.json();
-        const responseString = JSON.stringify(json, null, 2);
-
-        await ctx.reply("--- استجابة OKX API الخام ---");
-        
-        // إرسال الرد في أجزاء لتجنب تجاوز حد طول الرسالة
-        for (let i = 0; i < responseString.length; i += 4000) {
-            const chunk = responseString.substring(i, i + 4000);
-            await ctx.reply(`\`\`\`\n${chunk}\n\`\`\``, { parse_mode: "Markdown" });
-        }
-    } catch (error) {
-        await ctx.reply(`حدث خطأ أثناء التشخيص: ${error.message}`);
-        console.error("Error in debug command:", error);
-    }
-});
-
 bot.use(async (ctx, next) => {
     if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); }
     else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); }
@@ -513,11 +497,13 @@ bot.on("message:text", async (ctx) => {
 // --- بدء تشغيل البوت ---
 async function startBot() {
     console.log("Starting bot...");
-    previousBalanceState = await getBalanceForComparison() || {};
+    
+    // <<< التعديل الأهم: تحميل حالة الرصيد من الذاكرة الدائمة (الملف) >>>
+    previousBalanceState = loadBalanceState();
     if (Object.keys(previousBalanceState).length > 0) {
-        console.log("Initial balance state loaded successfully.");
+        console.log("Initial balance state loaded from file.");
     } else {
-        console.warn("Could not load initial balance. Monitoring might be inaccurate on the first cycle.");
+        console.log("No previous balance state found. Will capture on the first run.");
     }
     
     balanceMonitoringInterval = setInterval(monitorBalanceChanges, 1 * 60 * 1000);
