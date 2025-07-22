@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v18 (Final Stable Build)
+// OKX Advanced Analytics Bot - v19 (Diagnostic Mode Enabled)
 // =================================================================
-// هذا الإصدار يستخدم طريقة جلب الرصيد الأصلية والمُجربة مع كل الميزات الجديدة.
+// هذا الإصدار يحتوي على أمر /debug لتشخيص مشكلة جلب الرصيد.
 // =================================================================
 
 const express = require("express");
@@ -112,8 +112,6 @@ async function getMarketPrices() {
         return prices;
     } catch (error) { console.error("Exception in getMarketPrices:", error); return null; }
 }
-
-// --- تم إرجاع هذه الدوال إلى حالتها الأصلية التي كانت تعمل ---
 async function getPortfolio(prices) {
     try {
         const path = "/api/v5/account/balance";
@@ -155,8 +153,6 @@ async function getBalanceForComparison() {
         return balanceMap;
     } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; }
 }
-// --- نهاية الدوال التي تم إرجاعها لحالتها الأصلية ---
-
 async function monitorBalanceChanges() {
     const currentBalance = await getBalanceForComparison();
     const prices = await getMarketPrices();
@@ -294,6 +290,29 @@ async function sendSettingsMenu(ctx) {
         reply_markup: settingsKeyboard
     });
 }
+
+// --- أمر تشخيصي مؤقت ---
+bot.command("debug", async (ctx) => {
+    try {
+        await ctx.reply("⏳ جاري الآن طلب رصيدك من OKX... الرجاء الانتظار.");
+        const path = "/api/v5/account/balance";
+        const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
+        const json = await res.json();
+        const responseString = JSON.stringify(json, null, 2);
+
+        await ctx.reply("--- استجابة OKX API الخام ---");
+        
+        // إرسال الرد في أجزاء لتجنب تجاوز حد طول الرسالة
+        for (let i = 0; i < responseString.length; i += 4000) {
+            const chunk = responseString.substring(i, i + 4000);
+            await ctx.reply(`\`\`\`\n${chunk}\n\`\`\``, { parse_mode: "Markdown" });
+        }
+    } catch (error) {
+        await ctx.reply(`حدث خطأ أثناء التشخيص: ${error.message}`);
+        console.error("Error in debug command:", error);
+    }
+});
+
 bot.use(async (ctx, next) => {
     if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); }
     else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); }
