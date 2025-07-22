@@ -1,8 +1,8 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v8 (Final Reviewed Version)
+// OKX Advanced Analytics Bot - v10 (Final Master Version)
 // =================================================================
 // هذا الإصدار هو النسخة النهائية والمراجعة. تم التأكد من خلوه
-// من الأخطاء واحتوائه على جميع الميزات المطلوبة.
+// من الأخطاء واحتوائه على جميع الميزات المطلوبة بشكل مستقر.
 // =================================================================
 
 const express = require("express");
@@ -107,6 +107,23 @@ function createChartUrl(history) {
 
 // === دوال منطق البوت والمهام المجدولة ===
 
+async function getMarketPrices() {
+    try {
+        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+        const tickersJson = await tickersRes.json();
+        if (tickersJson.code !== '0') {
+            console.error("Failed to fetch market prices:", tickersJson.msg);
+            return null;
+        }
+        const prices = {};
+        tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        return prices;
+    } catch (error) {
+        console.error("Exception in getMarketPrices:", error);
+        return null;
+    }
+}
+
 async function getPortfolio() {
     try {
         const path = "/api/v5/account/balance";
@@ -114,10 +131,8 @@ async function getPortfolio() {
         const json = await res.json();
         if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` };
 
-        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
-        const tickersJson = await tickersRes.json();
-        const prices = {};
-        if (tickersJson.data) tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        const prices = await getMarketPrices();
+        if (!prices) return { error: "فشل في جلب أسعار السوق." };
         
         let assets = [], total = 0;
         json.data[0]?.details?.forEach(asset => {
@@ -126,7 +141,7 @@ async function getPortfolio() {
                 const instId = `${asset.ccy}-USDT`;
                 const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0);
                 const value = amount * price;
-                if (value >= 1) { // فلترة الأصول التي تقل قيمتها عن 1 دولار
+                if (value >= 1) {
                     assets.push({ asset: asset.ccy, price, value, amount });
                     total += value;
                 }
@@ -175,7 +190,12 @@ async function getBalanceForComparison() {
 
 async function monitorBalanceChanges() {
     const currentBalance = await getBalanceForComparison();
-    if (!currentBalance) return;
+    const prices = await getMarketPrices();
+
+    if (!currentBalance || !prices) {
+        console.error("Could not fetch balance or prices. Skipping this monitoring cycle.");
+        return;
+    }
 
     if (Object.keys(previousBalanceState).length === 0) {
         previousBalanceState = currentBalance;
@@ -184,24 +204,50 @@ async function monitorBalanceChanges() {
     }
 
     const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
-    const notifications = [];
+    const tradeNotifications = [];
+    let usdtChange = (currentBalance['USDT'] || 0) - (previousBalanceState['USDT'] || 0);
 
     allAssets.forEach(asset => {
+        if (asset === 'USDT') return;
+
         const prevAmount = previousBalanceState[asset] || 0;
         const currAmount = currentBalance[asset] || 0;
         const difference = currAmount - prevAmount;
+
         if (Math.abs(difference) < 1e-9) return;
+
+        const price = prices[`${asset}-USDT`];
+        const tradeValue = Math.abs(difference) * (price || 0);
+        let notification;
+
         if (difference > 0) {
-            notifications.push(`🟢 *شراء جديد أو إيداع* \nالكمية: \`${difference.toFixed(8)}\` *${asset}*`);
+            const percentage = currAmount > 0 ? (difference / currAmount) * 100 : 100;
+            notification = `🟢 *شراء ${asset}*` +
+                         `\n- الكمية: \`${difference.toFixed(6)}\`` +
+                         `\n- القيمة: \`~ $${tradeValue.toFixed(2)}\`` +
+                         `\n- نسبة الشراء: \`${percentage.toFixed(2)}%\` من الرصيد الجديد`;
         } else {
-            notifications.push(`🔴 *بيع أو سحب*\nالكمية: \`${Math.abs(difference).toFixed(8)}\` *${asset}*`);
+            const percentage = prevAmount > 0 ? (Math.abs(difference) / prevAmount) * 100 : 100;
+            notification = `🔴 *بيع ${asset}*` +
+                         `\n- الكمية: \`${Math.abs(difference).toFixed(6)}\`` +
+                         `\n- القيمة: \`~ $${tradeValue.toFixed(2)}\`` +
+                         `\n- نسبة البيع: \`${percentage.toFixed(2)}%\` من الرصيد السابق`;
         }
+        tradeNotifications.push(notification);
     });
 
-    if (notifications.length > 0) {
-        const message = "🔔 *تنبيه بتغير في الرصيد*\n\n" + notifications.join("\n\n");
-        await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
+    if (tradeNotifications.length > 0) {
+        let finalMessage = "🔔 *تنبيه بصفقة جديدة*\n\n" + tradeNotifications.join("\n\n---\n\n");
+
+        if (Math.abs(usdtChange) > 0.01) {
+            const cashImpactEmoji = usdtChange > 0 ? '📈' : '📉';
+            const cashImpactSign = usdtChange > 0 ? '+' : '';
+            finalMessage += `\n\n---\n${cashImpactEmoji} *التأثير على الكاش:* \`${cashImpactSign}$${usdtChange.toFixed(2)}\` USDT`;
+        }
+
+        await bot.api.sendMessage(AUTHORIZED_USER_ID, finalMessage, { parse_mode: "Markdown" });
     }
+
     previousBalanceState = currentBalance;
 }
 
@@ -209,12 +255,8 @@ async function checkPriceAlerts() {
     const alerts = loadAlerts();
     if (alerts.length === 0) return;
     try {
-        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
-        const tickersJson = await tickersRes.json();
-        if (tickersJson.code !== '0') return console.error("Failed to fetch tickers for alerts:", tickersJson.msg);
-        
-        const prices = {};
-        tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last));
+        const prices = await getMarketPrices();
+        if (!prices) return;
         
         const remainingAlerts = [];
         let alertsTriggered = false;
@@ -450,10 +492,18 @@ bot.on("message:text", async (ctx) => {
 // === بدء تشغيل البوت ===
 async function startBot() {
     try {
-        console.log("Bot is starting with smart balance monitoring...");
+        console.log("Bot is starting with smart trade notifications...");
         alertsCheckInterval = setInterval(checkPriceAlerts, 60000);
-        dailyJobsInterval = setInterval(runDailyJobs, 60 * 60 * 1000);
+        dailyJobsInterval = setInterval(runDailyJobs, 3600000);
         
+        // معالج للأخطاء العامة في البوت
+        bot.catch((err) => {
+            const ctx = err.ctx;
+            console.error(`Error while handling update ${ctx.update.update_id}:`);
+            console.error(err.error);
+        });
+        
+        // اختر طريقة التشغيل المناسبة لك
         // 1. Webhook (للاستضافة على سيرفر)
         // app.use(express.json());
         // app.use(webhookCallback(bot, "express"));
