@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v20 (Final Persistent State)
+// OKX Advanced Analytics Bot - v21 (Per-Asset PnL)
 // =================================================================
-// هذا الإصدار يضيف ذاكرة دائمة للرصيد لحل مشكلة فقدان الإشعارات بعد إعادة التشغيل.
+// هذا الإصدار يضيف ميزة الربح والخسارة لكل عملة على حدة في عرض المحفظة.
 // =================================================================
 
 const express = require("express");
@@ -24,7 +24,8 @@ const CAPITAL_FILE = `${DATA_DIR}/data_capital.json`;
 const ALERTS_FILE = `${DATA_DIR}/data_alerts.json`;
 const HISTORY_FILE = `${DATA_DIR}/data_history.json`;
 const SETTINGS_FILE = `${DATA_DIR}/data_settings.json`;
-const BALANCE_STATE_FILE = `${DATA_DIR}/data_balance_state.json`; // <<< ملف الذاكرة الدائمة الجديد
+const BALANCE_STATE_FILE = `${DATA_DIR}/data_balance_state.json`;
+const POSITIONS_FILE = `${DATA_DIR}/data_positions.json`; // ملف جديد لمتوسطات الشراء
 
 // --- متغيرات الحالة والمؤشرات ---
 let waitingState = null;
@@ -55,8 +56,10 @@ const loadHistory = () => readJsonFile(HISTORY_FILE, []);
 const saveHistory = (history) => writeJsonFile(HISTORY_FILE, history);
 const loadSettings = () => readJsonFile(SETTINGS_FILE, { dailySummary: false, autoPostToChannel: false });
 const saveSettings = (settings) => writeJsonFile(SETTINGS_FILE, settings);
-const loadBalanceState = () => readJsonFile(BALANCE_STATE_FILE, {}); // <<< دوال جديدة للذاكرة
-const saveBalanceState = (state) => writeJsonFile(BALANCE_STATE_FILE, state); // <<< دوال جديدة للذاكرة
+const loadBalanceState = () => readJsonFile(BALANCE_STATE_FILE, {});
+const saveBalanceState = (state) => writeJsonFile(BALANCE_STATE_FILE, state);
+const loadPositions = () => readJsonFile(POSITIONS_FILE, {}); // دوال جديدة للمراكز
+const savePositions = (positions) => writeJsonFile(POSITIONS_FILE, positions); // دوال جديدة للمراكز
 
 // === دوال API ===
 function getHeaders(method, path, body = "") {
@@ -72,6 +75,7 @@ function getHeaders(method, path, body = "") {
 
 // === دوال العرض والمساعدة ===
 function formatPortfolioMsg(assets, total, capital) {
+    const positions = loadPositions(); // تحميل متوسطات الشراء
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
     let msg = `📊 *ملخص المحفظة* 📊\n\n`;
@@ -79,12 +83,24 @@ function formatPortfolioMsg(assets, total, capital) {
     msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
     msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
     msg += `------------------------------------\n`;
+
     assets.forEach(a => {
         let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
         msg += `💎 *${a.asset}* (${percent}%)\n`;
         if (a.asset !== "USDT") msg += `  السعر: $${a.price.toFixed(4)}\n`;
         msg += `  القيمة: $${a.value.toFixed(2)}\n`;
-        msg += `  الكمية: ${a.amount.toFixed(6)}\n\n`;
+        msg += `  الكمية: ${a.amount.toFixed(6)}\n`;
+
+        // --- الجزء الجديد لحساب الربح والخسارة للعملة ---
+        if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
+            const avgBuyPrice = positions[a.asset].avgBuyPrice;
+            const totalCost = avgBuyPrice * a.amount;
+            const assetPnl = a.value - totalCost;
+            const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
+            const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
+            msg += `  *الربح/الخسارة:* ${pnlEmoji} $${assetPnl.toFixed(2)} (${assetPnlPercent.toFixed(2)}%)\n`;
+        }
+        msg += `\n`; // إضافة مسافة
     });
     msg += `🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
     return msg;
@@ -160,7 +176,6 @@ async function monitorBalanceChanges() {
         return;
     }
 
-    // إذا كانت الذاكرة فارغة (أول تشغيل على الإطلاق)، قم بتعبئتها والحفظ ثم الخروج
     if (Object.keys(previousBalanceState).length === 0) {
         previousBalanceState = currentBalance;
         saveBalanceState(previousBalanceState);
@@ -225,7 +240,6 @@ async function monitorBalanceChanges() {
         }
     }
     
-    // <<< التعديل الأهم: تحديث الذاكرة في المتغير وفي الملف >>>
     previousBalanceState = currentBalance;
     saveBalanceState(previousBalanceState);
 }
@@ -316,6 +330,34 @@ bot.command("pnl", async (ctx) => {
     const responseMessage = `*📊 نتيجة الحساب:*\n\n- *إجمالي تكلفة الشراء:* \`$${totalInvestment.toLocaleString()}\`\n- *إجمالي قيمة البيع:* \`$${totalSaleValue.toLocaleString()}\`\n\n- *قيمة الربح/الخسارة:* \`$${profitOrLoss.toLocaleString()}\`\n- *نسبة الربح/الخسارة:* \`${pnlPercentage.toFixed(2)}%\`\n\n*النتيجة النهائية: ${resultStatus}*`;
     await ctx.reply(responseMessage, { parse_mode: "Markdown" });
 });
+
+// --- الأمر الجديد لإدارة متوسطات الشراء ---
+bot.command("avg", async (ctx) => {
+    const args = ctx.match.trim().split(/\s+/);
+    if (args.length !== 2 || args[0] === '') {
+        return await ctx.reply(
+            "❌ *صيغة غير صحيحة.*\n\n" +
+            "يرجى استخدام الصيغة التالية:\n" +
+            "`/avg <SYMBOL> <PRICE>`\n\n" +
+            "*مثال:*\n`/avg OP 1.50`",
+            { parse_mode: "Markdown" }
+        );
+    }
+
+    const [symbol, priceStr] = args;
+    const price = parseFloat(priceStr);
+
+    if (isNaN(price) || price <= 0) {
+        return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا وصالحًا.");
+    }
+
+    const positions = loadPositions();
+    positions[symbol.toUpperCase()] = { avgBuyPrice: price };
+    savePositions(positions);
+
+    await ctx.reply(`✅ تم تحديث متوسط سعر شراء *${symbol.toUpperCase()}* إلى \`$${price.toFixed(4)}\`.`, { parse_mode: "Markdown" });
+});
+
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
@@ -441,6 +483,8 @@ bot.on("message:text", async (ctx) => {
                     if (fs.existsSync(ALERTS_FILE)) fs.unlinkSync(ALERTS_FILE);
                     if (fs.existsSync(HISTORY_FILE)) fs.unlinkSync(HISTORY_FILE);
                     if (fs.existsSync(SETTINGS_FILE)) fs.unlinkSync(SETTINGS_FILE);
+                    if (fs.existsSync(POSITIONS_FILE)) fs.unlinkSync(POSITIONS_FILE); // حذف ملف المراكز
+                    if (fs.existsSync(BALANCE_STATE_FILE)) fs.unlinkSync(BALANCE_STATE_FILE); // حذف ملف حالة الرصيد
                     await ctx.reply("🔥 تم حذف جميع البيانات والإعدادات بنجاح.");
                 } else {
                     await ctx.reply("🛑 تم إلغاء عملية الحذف.");
@@ -498,7 +542,6 @@ bot.on("message:text", async (ctx) => {
 async function startBot() {
     console.log("Starting bot...");
     
-    // <<< التعديل الأهم: تحميل حالة الرصيد من الذاكرة الدائمة (الملف) >>>
     previousBalanceState = loadBalanceState();
     if (Object.keys(previousBalanceState).length > 0) {
         console.log("Initial balance state loaded from file.");
@@ -520,3 +563,4 @@ async function startBot() {
 }
 
 startBot().catch(err => console.error("Failed to start bot:", err));
+
