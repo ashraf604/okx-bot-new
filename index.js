@@ -74,37 +74,45 @@ function getHeaders(method, path, body = "") {
 }
 
 // === دوال العرض والمساعدة ===
+// استبدل الدالة القديمة بالكامل بهذه النسخة
 function formatPortfolioMsg(assets, total, capital) {
     const positions = loadPositions();
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
     let msg = `📊 *ملخص المحفظة* 📊\n\n`;
-    msg += `💰 *القيمة الحالية:* $${total.toFixed(2)}\n`;
-    msg += `💼 *رأس المال الأساسي:* $${capital.toFixed(2)}\n`;
-    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} $${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)\n`;
-    msg += `------------------------------------\n`;
+    msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
+    msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`;
+    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += `━━━━━━━━━━━━━━━━━━\n`;
 
     assets.forEach(a => {
         let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
-        msg += `💎 *${a.asset}* (${percent}%)\n`;
-        if (a.asset !== "USDT") msg += `  السعر الحالي: $${a.price.toFixed(4)}\n`;
-        msg += `  القيمة: $${a.value.toFixed(2)}\n`;
-        msg += `  الكمية: ${a.amount.toFixed(6)}\n`;
+        
+        if (a.asset === "USDT") {
+            msg += `\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
+            msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`;
+        } else {
+            msg += `\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
+            msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`;
+            msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`;
 
-        if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
-            const avgBuyPrice = positions[a.asset].avgBuyPrice;
-            msg += `  متوسط الشراء: $${avgBuyPrice.toFixed(4)}\n`;
-            const totalCost = avgBuyPrice * a.amount;
-            const assetPnl = a.value - totalCost;
-            const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
-            const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
-            msg += `  *الربح/الخسارة:* ${pnlEmoji} $${assetPnl.toFixed(2)} (${assetPnlPercent.toFixed(2)}%)\n`;
+            if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
+                const avgBuyPrice = positions[a.asset].avgBuyPrice;
+                msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`;
+                const totalCost = avgBuyPrice * a.amount;
+                const assetPnl = a.value - totalCost;
+                const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
+                const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
+                msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)\n`;
+            } else {
+                msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله\n`;
+            }
         }
-        msg += `\n`;
     });
-    msg += `🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
+    msg += `\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
     return msg;
 }
+
 function createChartUrl(history) {
     if (history.length < 2) return null;
     const last7Days = history.slice(-7);
