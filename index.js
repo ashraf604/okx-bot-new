@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v24 (Professional Stable Build)
+// OKX Advanced Analytics Bot - v25 (Professional Final Build)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية المراجعة التي تحتوي على جميع الميزات.
+// هذا هو الإصدار النهائي والمراجع الذي يحتوي على جميع الميزات المطلوبة.
 // =================================================================
 
 const express = require("express");
@@ -94,9 +94,18 @@ async function monitorBalanceChanges() {
         await sendDebugMessage(`*تغيير مكتشف!* \n- العملة: ${asset}\n- السابق: \`${prevAmount}\`\n- الحالي: \`${currAmount}\``);
         
         const prices = await getMarketPrices();
+        if (!prices) { await sendDebugMessage("فشل جلب الأسعار."); continue; }
+
+        let previousTotalPortfolioValue = 0;
+        for (const prevAsset in previousBalanceState) {
+            const prevAssetPrice = prices[`${prevAsset}-USDT`] || (prevAsset === "USDT" ? 1 : 0);
+            previousTotalPortfolioValue += (previousBalanceState[prevAsset] * prevAssetPrice);
+        }
+        const previousUSDTBalance = previousBalanceState['USDT'] || 0;
+        
         const { total: newTotalPortfolioValue } = await getPortfolio(prices);
         const price = prices[`${asset}-USDT`];
-        if (!prices || !newTotalPortfolioValue || !price) { await sendDebugMessage("فشل جلب بيانات الأسعار/المحفظة لإرسال الإشعار."); continue; }
+        if (!newTotalPortfolioValue || !price) { await sendDebugMessage("فشل جلب بيانات المحفظة/السعر."); continue; }
 
         const tradeValue = Math.abs(difference) * price;
         const avgPrice = tradeValue / Math.abs(difference);
@@ -104,12 +113,19 @@ async function monitorBalanceChanges() {
         const typeEmoji = difference > 0 ? '🟢' : '🔴';
         
         let publicRecommendationText = "";
+        let callbackData = "";
+
         if (type === 'شراء') {
             const newAssetValue = currAmount * price;
             const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
-            publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
+            const entryOfPortfolio = previousTotalPortfolioValue > 0 ? (tradeValue / previousTotalPortfolioValue) * 100 : 0;
+            const entryOfCash = previousUSDTBalance > 0 ? (tradeValue / previousUSDTBalance) * 100 : 0;
+
+            publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*حجم الدخول:* \`${entryOfPortfolio.toFixed(2)}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCash.toFixed(2)}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
+            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${entryOfPortfolio.toFixed(2)}_${entryOfCash.toFixed(2)}_${type}`;
         } else {
             publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\``;
+            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_0_0_0_${type}`;
         }
 
         const remainingCash = currentBalance['USDT'] || 0;
@@ -122,7 +138,6 @@ async function monitorBalanceChanges() {
             await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
             await bot.api.sendMessage(AUTHORIZED_USER_ID, privateNotificationText, { parse_mode: "Markdown" });
         } else {
-            const callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${type}`;
             const confirmationKeyboard = new InlineKeyboard().text("✅ نشر في القناة", callbackData).text("❌ تجاهل", "ignore_trade");
             await bot.api.sendMessage(AUTHORIZED_USER_ID, privateNotificationText + "\n\n*هل تريد نشر التوصية في القناة؟*", { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
         }
@@ -164,22 +179,15 @@ bot.on("callback_query:data", async (ctx) => {
     await ctx.answerCallbackQuery();
 
     if (data.startsWith("publish_")) {
-        const [, asset, priceStr, type] = data.split('_');
+        const [, asset, priceStr, portfolioPercentageStr, entryOfPortfolioStr, entryOfCashStr, type] = data.split('_');
         const typeEmoji = type === 'شراء' ? '🟢' : '🔴';
-
-        const prices = await getMarketPrices();
-        const { assets, total } = await getPortfolio(prices);
-        const currentAsset = assets.find(a => a.asset === asset);
-        let publicRecommendationText = "";
-
-        if (type === 'شراء' && currentAsset) {
-            const portfolioPercentage = total > 0 ? (currentAsset.value / total) * 100 : 0;
-            publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${priceStr}\`\n` + `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
+        let finalRecommendation = "";
+        if (type === 'شراء') {
+            finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${priceStr}\`\n` + `*حجم الدخول:* \`${entryOfPortfolioStr}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCashStr}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentageStr}%\` *من المحفظة*`;
         } else {
-            publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\``;
+            finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\``;
         }
-
-        try { await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" }); await ctx.editMessageText("✅ تم نشر التوصية بنجاح."); } catch (e) { console.error("Failed to post to channel:", e); await ctx.editMessageText("❌ فشل النشر."); }
+        try { await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, finalRecommendation, { parse_mode: "Markdown" }); await ctx.editMessageText("✅ تم نشر التوصية بنجاح."); } catch (e) { console.error("Failed to post to channel:", e); await ctx.editMessageText("❌ فشل النشر."); }
         return;
     }
     if (data === "ignore_trade") { await ctx.editMessageText("👍 تم تجاهل الصفقة."); return; }
