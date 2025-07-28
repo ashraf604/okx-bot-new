@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v25 (Professional Final Build)
+// OKX Advanced Analytics Bot - v26 (Professional Build)
 // =================================================================
-// هذا هو الإصدار النهائي والمراجع الذي يحتوي على جميع الميزات المطلوبة.
+// هذا الإصدار هو النسخة النهائية والمراجعة التي تحتوي على جميع الميزات.
 // =================================================================
 
 const express = require("express");
@@ -115,22 +115,24 @@ async function monitorBalanceChanges() {
         let publicRecommendationText = "";
         let callbackData = "";
 
+        const newAssetValue = currAmount * price;
+        const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
+
         if (type === 'شراء') {
-            const newAssetValue = currAmount * price;
-            const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
             const entryOfPortfolio = previousTotalPortfolioValue > 0 ? (tradeValue / previousTotalPortfolioValue) * 100 : 0;
             const entryOfCash = previousUSDTBalance > 0 ? (tradeValue / previousUSDTBalance) * 100 : 0;
-
             publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*حجم الدخول:* \`${entryOfPortfolio.toFixed(2)}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCash.toFixed(2)}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
-            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${entryOfPortfolio.toFixed(2)}_${entryOfCash.toFixed(2)}_${type}`;
-        } else {
-            publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\``;
-            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_0_0_0_${type}`;
+            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${entryOfPortfolio.toFixed(2)}_${entryOfCash.toFixed(2)}_${type}_${currAmount}`;
+        } else { // بيع
+            if (currAmount < 0.0001) { // بيع كامل
+                publicRecommendationText = `🔔 *توصية جديدة: إغلاق مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\``;
+            } else { // بيع جزئي
+                publicRecommendationText = `🔔 *توصية جديدة: تخفيف مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*الكمية المتبقية تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
+            }
+            callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_0_0_${type}_${currAmount}`;
         }
 
         const remainingCash = currentBalance['USDT'] || 0;
-        const newAssetValue = currAmount * price;
-        const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
         let privateNotificationText = `🔔 *تنبيه بصفقة جديدة*\n\n` + `${typeEmoji} *${type} ${asset}*\n` + `- *الكمية:* \`${Math.abs(difference).toFixed(6)}\`\n` + `- *متوسط السعر:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `- *قيمة الصفقة:* ~ \`$${tradeValue.toFixed(2)}\`\n\n` + `--- \n📊 *الوضع بعد الصفقة:*\n` + `- *نسبة العملة:* \`${portfolioPercentage.toFixed(2)}%\`\n` + `- *الكاش المتبقي:* \`$${remainingCash.toFixed(2)}\``;
 
         const settings = loadSettings();
@@ -179,13 +181,18 @@ bot.on("callback_query:data", async (ctx) => {
     await ctx.answerCallbackQuery();
 
     if (data.startsWith("publish_")) {
-        const [, asset, priceStr, portfolioPercentageStr, entryOfPortfolioStr, entryOfCashStr, type] = data.split('_');
+        const [, asset, priceStr, portfolioPercentageStr, entryOfPortfolioStr, entryOfCashStr, type, currAmountStr] = data.split('_');
+        const currAmount = parseFloat(currAmountStr);
         const typeEmoji = type === 'شراء' ? '🟢' : '🔴';
         let finalRecommendation = "";
         if (type === 'شراء') {
             finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${priceStr}\`\n` + `*حجم الدخول:* \`${entryOfPortfolioStr}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCashStr}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentageStr}%\` *من المحفظة*`;
-        } else {
-            finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\``;
+        } else { // بيع
+             if (currAmount < 0.0001) { // بيع كامل
+                finalRecommendation = `🔔 *توصية جديدة: إغلاق مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\``;
+            } else { // بيع جزئي
+                finalRecommendation = `🔔 *توصية جديدة: تخفيف مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\`\n` + `*الكمية المتبقية تمثل الآن:* \`${portfolioPercentageStr}%\` *من المحفظة*`;
+            }
         }
         try { await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, finalRecommendation, { parse_mode: "Markdown" }); await ctx.editMessageText("✅ تم نشر التوصية بنجاح."); } catch (e) { console.error("Failed to post to channel:", e); await ctx.editMessageText("❌ فشل النشر."); }
         return;
