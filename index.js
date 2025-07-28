@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v26 (Professional Build)
+// OKX Advanced Analytics Bot - v27 (Final Stable & Reviewed Build)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية والمراجعة التي تحتوي على جميع الميزات.
+// هذا الإصدار هو النسخة النهائية والمراجعة التي تحتوي على جميع الميزات والإصلاحات.
 // =================================================================
 
 const express = require("express");
@@ -66,7 +66,48 @@ async function sendDebugMessage(message) {
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
 // === دوال العرض والمساعدة ===
-function formatPortfolioMsg(assets, total, capital) { const positions = loadPositions(); let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let msg = `📊 *ملخص المحفظة* 📊\n\n`; msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`; msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`; msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`; msg += `━━━━━━━━━━━━━━━━━━\n`; assets.forEach(a => { let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0; if (a.asset === "USDT") { msg += `\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`; } else { msg += `\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`; msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`; if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) { const avgBuyPrice = positions[a.asset].avgBuyPrice; msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`; const totalCost = avgBuyPrice * a.amount; const assetPnl = a.value - totalCost; const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0; const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴'; msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)\n`; } else { msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله\n`; } } }); msg += `\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`; return msg; }
+function formatPortfolioMsg(assets, total, capital) {
+    const positions = loadPositions();
+    let pnl = capital > 0 ? total - capital : 0;
+    let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+    let msg = `📊 *ملخص المحفظة* 📊\n\n`;
+    msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
+    msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`;
+    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += `━━━━━━━━━━━━━━━━━━`;
+
+    assets.forEach((a, index) => {
+        let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
+        
+        if (a.asset === "USDT") {
+            msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
+            msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\``;
+        } else {
+            msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
+            msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`;
+            msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`;
+
+            if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
+                const avgBuyPrice = positions[a.asset].avgBuyPrice;
+                msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`;
+                const totalCost = avgBuyPrice * a.amount;
+                const assetPnl = a.value - totalCost;
+                const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
+                const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
+                msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)`;
+            } else {
+                msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله`;
+            }
+        }
+
+        if (index < assets.length - 1) {
+            msg += `\n━━━━━━━━━━━━━━━━━━`;
+        }
+    });
+
+    msg += `\n\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
+    return msg;
+}
 function createChartUrl(history) { if (history.length < 2) return null; const last7Days = history.slice(-7); const labels = last7Days.map(h => h.date.slice(5)); const data = last7Days.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: 'أداء المحفظة آخر 7 أيام' } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 
 // === دوال منطق البوت والمهام المجدولة ===
@@ -77,10 +118,14 @@ async function monitorBalanceChanges() {
     await sendDebugMessage("بدء دورة التحقق من الصفقات...");
     const currentBalance = await getBalanceForComparison();
     if (!currentBalance) { await sendDebugMessage("فشل جلب الرصيد الحالي."); return; }
-    if (Object.keys(previousBalanceState).length === 0) { previousBalanceState = currentBalance; saveBalanceState(previousBalanceState); await sendDebugMessage("تم تسجيل الرصيد الأولي وحفظه."); return; }
+    if (Object.keys(previousBalanceState).length === 0) {
+        previousBalanceState = currentBalance;
+        saveBalanceState(previousBalanceState);
+        await sendDebugMessage("تم تسجيل الرصيد الأولي وحفظه.");
+        return;
+    }
     
     const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
-    let tradeDetected = false;
 
     for (const asset of allAssets) {
         if (asset === 'USDT') continue;
@@ -90,11 +135,10 @@ async function monitorBalanceChanges() {
 
         if (Math.abs(difference) < 1e-9) continue;
         
-        tradeDetected = true;
         await sendDebugMessage(`*تغيير مكتشف!* \n- العملة: ${asset}\n- السابق: \`${prevAmount}\`\n- الحالي: \`${currAmount}\``);
         
         const prices = await getMarketPrices();
-        if (!prices) { await sendDebugMessage("فشل جلب الأسعار."); continue; }
+        if (!prices) { await sendDebugMessage("فشل جلب الأسعار."); return; }
 
         let previousTotalPortfolioValue = 0;
         for (const prevAsset in previousBalanceState) {
@@ -105,7 +149,7 @@ async function monitorBalanceChanges() {
         
         const { total: newTotalPortfolioValue } = await getPortfolio(prices);
         const price = prices[`${asset}-USDT`];
-        if (!newTotalPortfolioValue || !price) { await sendDebugMessage("فشل جلب بيانات المحفظة/السعر."); continue; }
+        if (!newTotalPortfolioValue || !price) { await sendDebugMessage("فشل جلب بيانات المحفظة/السعر."); return; }
 
         const tradeValue = Math.abs(difference) * price;
         const avgPrice = tradeValue / Math.abs(difference);
@@ -124,9 +168,9 @@ async function monitorBalanceChanges() {
             publicRecommendationText = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*حجم الدخول:* \`${entryOfPortfolio.toFixed(2)}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCash.toFixed(2)}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
             callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_${entryOfPortfolio.toFixed(2)}_${entryOfCash.toFixed(2)}_${type}_${currAmount}`;
         } else { // بيع
-            if (currAmount < 0.0001) { // بيع كامل
+            if (currAmount < 0.0001) {
                 publicRecommendationText = `🔔 *توصية جديدة: إغلاق مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\``;
-            } else { // بيع جزئي
+            } else {
                 publicRecommendationText = `🔔 *توصية جديدة: تخفيف مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${avgPrice.toFixed(4)}\`\n` + `*الكمية المتبقية تمثل الآن:* \`${portfolioPercentage.toFixed(2)}%\` *من المحفظة*`;
             }
             callbackData = `publish_${asset}_${avgPrice.toFixed(4)}_${portfolioPercentage.toFixed(2)}_0_0_${type}_${currAmount}`;
@@ -143,12 +187,16 @@ async function monitorBalanceChanges() {
             const confirmationKeyboard = new InlineKeyboard().text("✅ نشر في القناة", callbackData).text("❌ تجاهل", "ignore_trade");
             await bot.api.sendMessage(AUTHORIZED_USER_ID, privateNotificationText + "\n\n*هل تريد نشر التوصية في القناة؟*", { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
         }
+        
+        previousBalanceState = currentBalance;
+        saveBalanceState(previousBalanceState);
+        await sendDebugMessage("تم تحديث وحفظ الحالة بعد معالجة صفقة واحدة. إنهاء الدورة الحالية.");
+        return; 
     }
     
-    if (!tradeDetected) { await sendDebugMessage("لا توجد تغييرات."); }
+    await sendDebugMessage("لا توجد تغييرات.");
     previousBalanceState = currentBalance;
     saveBalanceState(previousBalanceState);
-    await sendDebugMessage("تم تحديث وحفظ حالة الرصيد.");
 }
 async function getInstrumentDetails(instId) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const json = await res.json(); if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` }; const data = json.data[0]; return { price: parseFloat(data.last), high24h: parseFloat(data.high24h), low24h: parseFloat(data.low24h), vol24h: parseFloat(data.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function checkPriceAlerts() { const alerts = loadAlerts(); if (alerts.length === 0) return; try { const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = prices[alert.instId]; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
@@ -188,9 +236,9 @@ bot.on("callback_query:data", async (ctx) => {
         if (type === 'شراء') {
             finalRecommendation = `🔔 *توصية جديدة: ${type}* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر الدخول:* ~ \`$${priceStr}\`\n` + `*حجم الدخول:* \`${entryOfPortfolioStr}%\` *من المحفظة*\n` + `*تم استخدام:* \`${entryOfCashStr}%\` *من الكاش المتاح*\n` + `*تمثل الآن:* \`${portfolioPercentageStr}%\` *من المحفظة*`;
         } else { // بيع
-             if (currAmount < 0.0001) { // بيع كامل
+             if (currAmount < 0.0001) {
                 finalRecommendation = `🔔 *توصية جديدة: إغلاق مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\``;
-            } else { // بيع جزئي
+            } else {
                 finalRecommendation = `🔔 *توصية جديدة: تخفيف مركز* ${typeEmoji}\n\n` + `*العملة:* \`${asset}/USDT\`\n` + `*متوسط سعر البيع:* ~ \`$${priceStr}\`\n` + `*الكمية المتبقية تمثل الآن:* \`${portfolioPercentageStr}%\` *من المحفظة*`;
             }
         }
