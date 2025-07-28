@@ -66,48 +66,7 @@ async function sendDebugMessage(message) {
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
 // === دوال العرض والمساعدة ===
-function formatPortfolioMsg(assets, total, capital) {
-    const positions = loadPositions();
-    let pnl = capital > 0 ? total - capital : 0;
-    let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-    let msg = `📊 *ملخص المحفظة* 📊\n\n`;
-    msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
-    msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`;
-    msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`;
-    msg += `━━━━━━━━━━━━━━━━━━`;
-
-    assets.forEach((a, index) => {
-        let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0;
-        
-        if (a.asset === "USDT") {
-            msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
-            msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\``;
-        } else {
-            msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`;
-            msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`;
-            msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`;
-
-            if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
-                const avgBuyPrice = positions[a.asset].avgBuyPrice;
-                msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`;
-                const totalCost = avgBuyPrice * a.amount;
-                const assetPnl = a.value - totalCost;
-                const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
-                const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
-                msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)`;
-            } else {
-                msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله`;
-            }
-        }
-
-        if (index < assets.length - 1) {
-            msg += `\n━━━━━━━━━━━━━━━━━━`;
-        }
-    });
-
-    msg += `\n\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
-    return msg;
-}
+function formatPortfolioMsg(assets, total, capital) { const positions = loadPositions(); let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let msg = `📊 *ملخص المحفظة* 📊\n\n`; msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`; msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`; msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`; msg += `━━━━━━━━━━━━━━━━━━`; assets.forEach((a, index) => { let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0; if (a.asset === "USDT") { msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\``; } else { msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`; msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`; if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) { const avgBuyPrice = positions[a.asset].avgBuyPrice; msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`; const totalCost = avgBuyPrice * a.amount; const assetPnl = a.value - totalCost; const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0; const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴'; msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)`; } else { msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله`; } } if (index < assets.length - 1) { msg += `\n━━━━━━━━━━━━━━━━━━`; } }); msg += `\n\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`; return msg; }
 function createChartUrl(history) { if (history.length < 2) return null; const last7Days = history.slice(-7); const labels = last7Days.map(h => h.date.slice(5)); const data = last7Days.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: 'أداء المحفظة آخر 7 أيام' } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 
 // === دوال منطق البوت والمهام المجدولة ===
@@ -149,7 +108,7 @@ async function monitorBalanceChanges() {
         
         const { total: newTotalPortfolioValue } = await getPortfolio(prices);
         const price = prices[`${asset}-USDT`];
-        if (!newTotalPortfolioValue || !price) { await sendDebugMessage("فشل جلب بيانات المحفظة/السعر."); return; }
+        if (newTotalPortfolioValue === undefined || !price) { await sendDebugMessage("فشل جلب بيانات المحفظة/السعر."); return; }
 
         const tradeValue = Math.abs(difference) * price;
         const avgPrice = tradeValue / Math.abs(difference);
