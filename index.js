@@ -1,7 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v28 (Corrected Full Build)
-// =================================================================
-// هذا الإصدار هو النسخة الكاملة بعد تصحيح خطأ الدوال المفقودة.
+// OKX Advanced Analytics Bot - v29 (Final Reviewed Build)
 // =================================================================
 
 const express = require("express");
@@ -87,8 +85,6 @@ async function monitorBalanceChanges() {
     if (Object.keys(previousBalanceState).length === 0) { previousBalanceState = currentBalance; saveBalanceState(previousBalanceState); await sendDebugMessage("تم تسجيل الرصيد الأولي وحفظه."); return; }
     
     const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
-    let tradeDetected = false;
-
     for (const asset of allAssets) {
         if (asset === 'USDT') continue;
         const prevAmount = previousBalanceState[asset] || 0;
@@ -97,7 +93,6 @@ async function monitorBalanceChanges() {
 
         if (Math.abs(difference) < 1e-9) continue;
         
-        tradeDetected = true;
         await sendDebugMessage(`*تغيير مكتشف!* \n- العملة: ${asset}\n- السابق: \`${prevAmount}\`\n- الحالي: \`${currAmount}\``);
         
         const prices = await getMarketPrices();
@@ -157,7 +152,7 @@ async function monitorBalanceChanges() {
         return; 
     }
     
-    if (!tradeDetected) { await sendDebugMessage("لا توجد تغييرات."); }
+    await sendDebugMessage("لا توجد تغييرات.");
     previousBalanceState = currentBalance;
     saveBalanceState(previousBalanceState);
 }
@@ -169,22 +164,14 @@ async function checkPriceMovements() {
     const alertSettings = loadAlertSettings();
     const priceTracker = loadPriceTracker();
     const prices = await getMarketPrices();
-    if (!prices) {
-        await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة.");
-        return;
-    }
+    if (!prices) { await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة."); return; }
     
     const { assets, total: currentTotalValue, error } = await getPortfolio(prices);
-    if (error || currentTotalValue === undefined) {
-        await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة.");
-        return;
-    }
+    if (error || currentTotalValue === undefined) { await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة."); return; }
 
     if (priceTracker.totalPortfolioValue === 0) {
         priceTracker.totalPortfolioValue = currentTotalValue;
-        assets.forEach(a => {
-            if (a.price) priceTracker.assets[a.asset] = a.price;
-        });
+        assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; });
         savePriceTracker(priceTracker);
         await sendDebugMessage("تم تسجيل قيم تتبع الأسعار الأولية.");
         return;
@@ -192,13 +179,12 @@ async function checkPriceMovements() {
     
     let trackerUpdated = false;
 
-    // 1. التحقق من حركة المحفظة الإجمالية
     const lastTotalValue = priceTracker.totalPortfolioValue;
     if (lastTotalValue > 0) {
         const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100;
         if (Math.abs(changePercent) >= alertSettings.global) {
             const emoji = changePercent > 0 ? '🟢' : '🔴';
-            const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; // <<< التعديل هنا
+            const movementText = changePercent > 0 ? 'صعود' : 'هبوط';
             const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``;
             await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
             priceTracker.totalPortfolioValue = currentTotalValue;
@@ -206,7 +192,6 @@ async function checkPriceMovements() {
         }
     }
 
-    // 2. التحقق من حركة العملات الفردية
     for (const asset of assets) {
         if (asset.asset === 'USDT' || !asset.price) continue;
         
@@ -216,7 +201,7 @@ async function checkPriceMovements() {
             const threshold = alertSettings.overrides[asset.asset] || alertSettings.global;
             if (Math.abs(changePercent) >= threshold) {
                 const emoji = changePercent > 0 ? '🟢' : '🔴';
-                const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; // <<< التعديل هنا
+                const movementText = changePercent > 0 ? 'صعود' : 'هبوط';
                 const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${asset.price.toFixed(4)}\``;
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
                 priceTracker.assets[asset.asset] = asset.price;
@@ -235,7 +220,6 @@ async function checkPriceMovements() {
         await sendDebugMessage("لا توجد حركات أسعار تتجاوز الحد.");
     }
 }
-
 
 // --- لوحات المفاتيح والقوائم ---
 const mainKeyboard = new Keyboard().text("📊 عرض المحفظة").text("📈 أداء المحفظة").row().text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row().text("🧮 حاسبة الربح والخسارة").row().text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
