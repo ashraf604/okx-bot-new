@@ -192,18 +192,21 @@ async function checkPriceMovements() {
     
     let trackerUpdated = false;
 
+    // 1. التحقق من حركة المحفظة الإجمالية
     const lastTotalValue = priceTracker.totalPortfolioValue;
     if (lastTotalValue > 0) {
         const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100;
         if (Math.abs(changePercent) >= alertSettings.global) {
             const emoji = changePercent > 0 ? '🟢' : '🔴';
-            const message = `📊 *تنبيه حركة المحفظة!*\n\n*تحركت القيمة الإجمالية:* ${emoji} \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``;
+            const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; // <<< التعديل هنا
+            const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``;
             await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
             priceTracker.totalPortfolioValue = currentTotalValue;
             trackerUpdated = true;
         }
     }
 
+    // 2. التحقق من حركة العملات الفردية
     for (const asset of assets) {
         if (asset.asset === 'USDT' || !asset.price) continue;
         
@@ -213,7 +216,8 @@ async function checkPriceMovements() {
             const threshold = alertSettings.overrides[asset.asset] || alertSettings.global;
             if (Math.abs(changePercent) >= threshold) {
                 const emoji = changePercent > 0 ? '🟢' : '🔴';
-                const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*تحرك السعر:* ${emoji} \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${asset.price.toFixed(4)}\``;
+                const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; // <<< التعديل هنا
+                const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${asset.price.toFixed(4)}\``;
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
                 priceTracker.assets[asset.asset] = asset.price;
                 trackerUpdated = true;
