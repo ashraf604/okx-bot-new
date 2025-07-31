@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v34 (Professional UI Design)
+// OKX Advanced Analytics Bot - v31.1 (Reviewed & Corrected)
 // =================================================================
-// هذا الإصدار يطبق التصميم الاحترافي النهائي لميزة عرض المحفظة كصورة.
+// هذا الإصدار يطبق "النموذج التحليلي المنظم" ويصلح كافة الأخطاء.
 // =================================================================
 
 const express = require("express");
@@ -96,7 +96,7 @@ function formatPortfolioMsg(assets, total, capital) {
 
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
-        msg += "\n";
+        msg += "\n"; // Add a newline before each asset for better spacing
         if (a.asset === "USDT") {
             msg += `╭─ *${a.asset}*\n`;
             msg += `╰─ 💰 *الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
@@ -123,126 +123,6 @@ function formatPortfolioMsg(assets, total, capital) {
     });
     return msg;
 }
-
-// ==== نسخة الاختبار النهائية مع CSS مبسط جدًا ====
-async function generatePortfolioImageUrl(assets, total, capital) {
-    try {
-        if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
-            console.error("HCTI_USER_ID or HCTI_API_KEY is missing from .env file.");
-            return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
-        }
-
-        // CSS مبسط جدًا بدون خطوط خارجية أو ظلال
-        const simplifiedCss = `
-            body { 
-                font-family: sans-serif; /* استخدام خط أساسي */
-                background-color: #2a2d35; 
-                color: #e5e7eb; 
-                padding: 20px; 
-                direction: rtl; 
-            }
-            .card { 
-                background-color: #373a43;
-                border: 2px solid #555;
-                padding: 25px; 
-                width: 600px;
-            }
-            .header { 
-                text-align: center;
-                border-bottom: 1px solid #555; 
-                padding-bottom: 15px; 
-                margin-bottom: 20px; 
-            }
-            .header h2 { 
-                margin: 0; 
-                color: #fff; 
-            }
-            .stats { 
-                display: flex; 
-                justify-content: space-around; 
-                text-align: center; 
-                margin-bottom: 25px; 
-            }
-            .pnl.positive { color: #22c55e; }
-            .pnl.negative { color: #ef4444; }
-            .assets-title { 
-                font-size: 18px; 
-                font-weight: bold; 
-                color: #fff; 
-                margin-bottom: 15px; 
-                text-align: center;
-            }
-            .asset { 
-                display: flex; 
-                justify-content: space-between;
-                padding: 10px 0; 
-                border-bottom: 1px solid #555; 
-            }
-            .asset:last-child { border-bottom: none; }
-            .asset-info .name { font-size: 18px; font-weight: bold; color: #fff; }
-            .asset-values .value { font-size: 16px; font-weight: bold; }
-        `;
-
-        // بناء الـ HTML بنفس الطريقة
-        const pnl = capital > 0 ? total - capital : 0;
-        const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-        let assetsRows = '';
-        const positions = loadPositions();
-        assets.forEach(asset => {
-            const percent = total > 0 ? (asset.value / total) * 100 : 0;
-            assetsRows += `
-                <div class="asset">
-                    <div class="asset-info">
-                        <div class="name">${asset.asset}</div>
-                    </div>
-                    <div class="asset-values">
-                        <div class="value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        const finalHtml = `
-            <html>
-                <head><meta charset="UTF-8"><style>${simplifiedCss}</style></head>
-                <body>
-                    <div class="card">
-                        <div class="header">
-                            <h2>ملخص المحفظة</h2>
-                        </div>
-                        <div class="stats">
-                            <div><h3>القيمة:</h3> <p>$${total.toFixed(2)}</p></div>
-                            <div><h3>الربح/الخسارة:</h3> <p class="pnl ${pnl >= 0 ? 'positive' : 'negative'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</p></div>
-                        </div>
-                        <div class="assets-title">الأصول</div>
-                        ${assetsRows}
-                    </div>
-                </body>
-            </html>
-        `;
-
-        // استدعاء الخدمة
-        const response = await fetch('https://hcti.io/v1/image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64') },
-            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" }) // محاولة طلب الخط بطريقة أخرى
-        });
-        const data = await response.json();
-        if (data.url) {
-            return { url: data.url };
-        } else {
-            console.error("HCTI API Error:", data);
-            return { error: "فشل إنشاء الصورة حتى مع التصميم المبسط." };
-        }
-
-    } catch (error) {
-        console.error("Exception in generatePortfolioImageUrl:", error);
-        return { error: "حدث خطأ غير متوقع." };
-    }
-}
-
-
-
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
@@ -462,35 +342,6 @@ bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
 
-    if (data === 'generate_portfolio_image') {
-        try {
-            await ctx.editMessageText("⏳ جارٍ إنشاء بطاقة المحفظة، قد يستغرق الأمر لحظات...", { reply_markup: undefined });
-            const prices = await getMarketPrices();
-            if (!prices) {
-                await ctx.editMessageText("❌ فشل جلب الأسعار.");
-                return;
-            }
-            const { assets, total, error } = await getPortfolio(prices);
-            if (error) {
-                await ctx.editMessageText(`❌ ${error}`);
-                return;
-            }
-            const capital = loadCapital();
-            const result = await generatePortfolioImageUrl(assets, total, capital);
-
-            if (result.url) {
-                await ctx.replyWithPhoto(result.url);
-                await ctx.deleteMessage();
-            } else {
-                await ctx.editMessageText(`❌ حدث خطأ أثناء إنشاء الصورة.\n\n*السبب:* ${result.error}`);
-            }
-        } catch (e) {
-            console.error("Error handling image generation callback:", e);
-            await ctx.reply("❌ حدث خطأ غير متوقع في معالج الصور.");
-        }
-        return;
-    }
-    
     if (data.startsWith("publish_")) {
         const [, type, asset, ...params] = data.split('_');
         let finalRecommendation = "";
@@ -642,20 +493,7 @@ bot.on("message:text", async (ctx) => {
     }
 
     switch (text) {
-        case "📊 عرض المحفظة":
-            await ctx.reply('⏳ لحظات...');
-            const prices = await getMarketPrices();
-            if (!prices) return await ctx.reply("❌ فشل جلب الأسعار.");
-            const { assets, total, error } = await getPortfolio(prices);
-            if (error) {
-                await ctx.reply(`❌ ${error}`);
-            } else {
-                const capital = loadCapital();
-                const msg = formatPortfolioMsg(assets, total, capital);
-                const imageButtonKeyboard = new InlineKeyboard().text("🖼️ عرض كصورة", "generate_portfolio_image");
-                await ctx.reply(msg, { parse_mode: "Markdown", reply_markup: imageButtonKeyboard });
-            }
-            break;
+        case "📊 عرض المحفظة": await ctx.reply('⏳ لحظات...'); const prices = await getMarketPrices(); if (!prices) return await ctx.reply("❌ فشل جلب الأسعار."); const { assets, total, error } = await getPortfolio(prices); if (error) { await ctx.reply(`❌ ${error}`); } else { const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); } break;
         case "📈 أداء المحفظة":
             const keyboard = new InlineKeyboard()
                 .text("آخر 24 ساعة", "chart_24h")
