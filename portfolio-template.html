@@ -7,133 +7,121 @@
         body { 
             font-family: 'Cairo', sans-serif; 
             background-color: #1a1c22; 
-            color: #e5e7eb; 
-            margin: 0; 
-            padding: 20px; 
-            direction: rtl; 
+            margin: 0;
+            padding: 0;
         }
         .card { 
-            background-color: #2a2d35; 
+            background-color: #2a2d35;
+            color: #e5e7eb;
             border-radius: 15px; 
             padding: 25px; 
             width: 600px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3); 
+            box-sizing: border-box;
             border: 1px solid #444;
+            direction: rtl;
         }
-        .header { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            border-bottom: 1px solid #444; 
-            padding-bottom: 15px; 
-            margin-bottom: 20px; 
+        .pnl-positive { color: #22c55e; }
+        .pnl-negative { color: #ef4444; }
+
+        /* Table Styles */
+        .main-table {
+            width: 100%;
+            border-collapse: collapse;
         }
-        .header h2 { 
+        .main-table h2 {
             margin: 0; 
-            color: #fff; 
+            color: #fff;
+            text-align: right;
         }
-        .header .timestamp { 
+        .main-table .timestamp {
             font-size: 12px; 
-            color: #9ca3af; 
+            color: #9ca3af;
+            text-align: left;
         }
-        .stats { 
-            display: flex; 
-            justify-content: space-around; 
-            text-align: center; 
-            margin-bottom: 25px; 
-        }
-        .stat-item { 
+        .stat-item {
             background-color: #373a43; 
             padding: 15px; 
             border-radius: 10px; 
-            width: 30%; 
+            text-align: center;
         }
-        .stat-item h3 { 
+        .stat-item h3 {
             margin: 0 0 5px 0; 
             font-size: 14px; 
             color: #9ca3af; 
             font-weight: 400;
         }
-        .stat-item p { 
+        .stat-item p {
             margin: 0; 
             font-size: 20px; 
-            font-weight: 700; 
+            font-weight: 700;
         }
-        .pnl.positive { 
-            color: #22c55e; 
-        }
-        .pnl.negative { 
-            color: #ef4444; 
-        }
-        .assets-title { 
+        .assets-title {
             font-size: 18px; 
             font-weight: 700; 
             color: #fff; 
-            margin-bottom: 15px; 
-            border-bottom: 1px solid #444; 
-            padding-bottom: 10px; 
+            padding: 15px 0;
+            border-bottom: 1px solid #444;
+            border-top: 1px solid #444;
         }
-        .asset { 
-            display: flex; 
-            align-items: center; 
-            padding: 12px 0; 
-            border-bottom: 1px solid #373a43; 
-        }
-        .asset:last-child { 
-            border-bottom: none; 
-        }
-        .asset-info { 
-            flex-grow: 1; 
-        }
-        .asset-info .name { 
+        .asset-name {
             font-size: 18px; 
             font-weight: 700; 
-            color: #fff; 
+            color: #fff;
         }
-        .asset-info .details { 
+        .asset-details {
             font-size: 13px; 
-            color: #9ca3af; 
+            color: #9ca3af;
         }
-        .asset-values { 
-            text-align: left; 
-        }
-        .asset-values .value { 
+        .asset-value {
             font-size: 18px; 
             font-weight: 700; 
-            color: #fff; 
+            color: #fff;
+            text-align: left;
         }
-        .pnl-asset.positive { 
-            color: #22c55e; 
+        .asset-pnl {
             font-size: 13px;
-        }
-        .pnl-asset.negative { 
-            color: #ef4444; 
-            font-size: 13px;
+            text-align: left;
         }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="header">
-            <h2>ملخص المحفظة</h2>
-            <div class="timestamp">{{TIMESTAMP}}</div>
-        </div>
-        <div class="stats">
-            <div class="stat-item">
-                <h3>القيمة الحالية</h3>
-                <p>${{TOTAL_VALUE}}</p>
-            </div>
-            <div class="stat-item">
-                <h3>رأس المال</h3>
-                <p>${{CAPITAL}}</p>
-            </div>
-            <div class="stat-item">
-                <h3>الربح/الخسارة</h3>
-                <p class="pnl {{PNL_CLASS}}">{{PNL_SIGN}}${{PNL_AMOUNT}} ({{PNL_PERCENT}}%)</p>
-            </div>
-        </div>
-        <div class="assets-title">الأصول</div>
-        {{ASSETS_ROWS}}
+        <table class="main-table">
+            <tr>
+                <td style="padding-bottom: 20px;"><h2>ملخص المحفظة</h2></td>
+                <td style="padding-bottom: 20px;" class="timestamp">{{TIMESTAMP}}</td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="width: 33%; padding: 5px;">
+                                <div class="stat-item">
+                                    <h3>القيمة الحالية</h3>
+                                    <p>${{TOTAL_VALUE}}</p>
+                                </div>
+                            </td>
+                            <td style="width: 33%; padding: 5px;">
+                                <div class="stat-item">
+                                    <h3>رأس المال</h3>
+                                    <p>${{CAPITAL}}</p>
+                                </div>
+                            </td>
+                            <td style="width: 33%; padding: 5px;">
+                                <div class="stat-item">
+                                    <h3>الربح/الخسارة</h3>
+                                    <p class="pnl {{PNL_CLASS}}">{{PNL_SIGN}}${{PNL_AMOUNT}} ({{PNL_PERCENT}}%)</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2" class="assets-title">الأصول</td>
+            </tr>
+            {{ASSETS_ROWS}}
+        </table>
     </div>
 </body>
 </html>
