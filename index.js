@@ -93,7 +93,7 @@ function formatPortfolioMsg(assets, total, capital) {
     msg += `   📈 *الربح/الخسارة (PnL):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `💎 *الأصــــــــول:*\n`;
-
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
         msg += "\n"; // Add a newline before each asset for better spacing
