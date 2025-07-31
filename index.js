@@ -83,7 +83,7 @@ function formatPortfolioMsg(assets, total, capital) {
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
     const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
 
-    let msg = `╔═════📊 ملخص المحفظة ═════╗\n\n`;
+    let msg = `╔════📊 ملخص المحفظة ════╗\n\n`;
     msg += `  💰 **القيمة الإجمالية:** \`$${total.toFixed(2)}\`\n`;
     msg += `  📉 **النتيجة:** \`$${pnl.toFixed(2)}\` \`(${pnlPercent.toFixed(2)}%)\` ${pnlEmoji}\n`;
     msg += `  💼 **رأس المال:** \`$${capital.toFixed(2)}\`\n\n`;
@@ -93,10 +93,10 @@ function formatPortfolioMsg(assets, total, capital) {
 
         if (a.asset === "USDT") {
             // قسم خاص لـ USDT
-            msg += `╠═══════💎 ${a.asset} (${percent}%) ═══════╣\n`;
+            msg += `╠═════💎 ${a.asset} (${percent}%) ═════╣\n`;
             msg += `  └─ **القيمة:** \`$${a.value.toFixed(2)}\`\n\n`;
         } else {
-            msg += `╠═══════💎 ${a.asset} (${percent}%) ═══════╣\n`;
+            msg += `╠═════💎 ${a.asset} (${percent}%) ═════╣\n`;
             msg += `  ├─ **القيمة:** \`$${a.value.toFixed(2)}\`\n`;
 
             if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
