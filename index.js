@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v32.1 (Error Diagnostics)
+// OKX Advanced Analytics Bot - v34 (Professional UI Design)
 // =================================================================
-// هذا الإصدار يحسن من معالجة الأخطاء في إنشاء الصور.
+// هذا الإصدار يطبق التصميم الاحترافي النهائي لميزة عرض المحفظة كصورة.
 // =================================================================
 
 const express = require("express");
@@ -124,7 +124,6 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// ==== النسخة النهائية لدالة إنشاء الصورة (مع الجداول) ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
         if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
@@ -149,12 +148,10 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             pnlAmount_str = pnl.toFixed(2);
             pnlPercent_str = pnlPercent.toFixed(2);
             pnlSign = pnl >= 0 ? '+' : '';
-            pnlClass = pnl >= 0 ? 'positive' : 'negative';
+            pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
         } else {
             pnlAmount_str = "N/A";
             pnlPercent_str = "N/A";
-            pnlSign = "";
-            pnlClass = "";
         }
 
         let assetsRows = '';
@@ -162,35 +159,33 @@ async function generatePortfolioImageUrl(assets, total, capital) {
 
         assets.forEach(asset => {
             const percent = total > 0 ? (asset.value / total) * 100 : 0;
-            let pnlText = '---';
-            let avgBuyText = 'N/A';
-            if (positions[asset.asset] && positions[asset.asset].avgBuyPrice > 0) {
-                avgBuyText = `$${positions[asset.asset].avgBuyPrice.toFixed(4)}`;
-                if(asset.asset !== 'USDT') {
-                    const avgBuyPrice = positions[asset.asset].avgBuyPrice;
-                    const assetPnl = asset.value - (avgBuyPrice * asset.amount);
-                    const assetPnlClass = assetPnl >= 0 ? 'positive' : 'negative';
-                    const assetPnlSign = assetPnl >= 0 ? '+' : '';
-                    pnlText = `<span class="pnl-${assetPnlClass}">${assetPnlSign}$${assetPnl.toFixed(2)}</span>`;
-                }
+            let pnlText = `---`;
+            let pnlClassAsset = '';
+            let avgBuyPriceText = positions[asset.asset] ? `$${positions[asset.asset].avgBuyPrice.toFixed(4)}` : 'N/A';
+
+            if (positions[asset.asset] && positions[asset.asset].avgBuyPrice > 0 && asset.asset !== 'USDT') {
+                const avgBuyPrice = positions[asset.asset].avgBuyPrice;
+                const assetPnl = asset.value - (avgBuyPrice * asset.amount);
+                const assetPnlSign = assetPnl >= 0 ? '+' : '';
+                pnlClassAsset = assetPnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                pnlText = `${assetPnlSign}$${assetPnl.toFixed(2)}`;
             }
             
             assetsRows += `
-                <tr style="border-bottom: 1px solid #373a43;">
-                    <td style="padding: 12px 0;">
-                        <div class="asset-name">${asset.asset}</div>
-                        <div class="asset-details">متوسط الشراء: ${avgBuyText}</div>
-                    </td>
-                    <td style="padding: 12px 0;">
-                        <div class="asset-value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
-                        <div class="asset-pnl">${pnlText}</div>
-                    </td>
-                </tr>
+                <div class="asset">
+                    <div class="asset-left">
+                        <div class="name">${asset.asset}</div>
+                        <div class="details">متوسط الشراء: ${avgBuyPriceText}</div>
+                    </div>
+                    <div class="asset-right">
+                        <div class="value">$${asset.value.toFixed(2)}</div>
+                        <div class="pnl ${pnlClassAsset}">${pnlText} (${percent.toFixed(2)}%)</div>
+                    </div>
+                </div>
             `;
         });
         
         const finalHtml = htmlTemplate
-            .replace('{{TIMESTAMP}}', new Date().toLocaleString('ar-EG'))
             .replace('{{TOTAL_VALUE}}', total.toFixed(2))
             .replace('{{CAPITAL}}', capital.toFixed(2))
             .replace('{{PNL_CLASS}}', pnlClass)
@@ -211,7 +206,7 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             return { url: data.url };
         } else {
             console.error("HCTI API Error:", data);
-            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم للمزيد من التفاصيل." };
+            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب." };
         }
 
     } catch (error) {
@@ -219,6 +214,8 @@ async function generatePortfolioImageUrl(assets, total, capital) {
         return { error: "حدث خطأ برمجي غير متوقع أثناء إنشاء الصورة." };
     }
 }
+
+
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
@@ -242,7 +239,7 @@ function calculatePerformanceStats(history) {
     return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue };
 }
 
-// === دوال منطق البوت والمهام المجدولة (بدون تغيير) ===
+// === دوال منطق البوت والمهام المجدولة ===
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last)); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
 async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0); const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price, value, amount }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
