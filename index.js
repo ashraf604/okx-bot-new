@@ -124,35 +124,45 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// ==== دالة التشخيص النهائية - استبدل الدالة الحالية بهذه ====
+// ==== النسخة النهائية والإنتاجية لدالة إنشاء الصورة ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
-        console.log("--- [START] Image Generation ---");
-
-        // 1. طباعة البيانات الأولية للتأكد من أنها سليمة
-        console.log(`[DATA] Total: ${total}, Capital: ${capital}`);
-        console.log(`[DATA] Assets Count: ${assets.length}`);
-
         if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
-            console.error("[ERROR] HCTI keys are missing from .env");
             return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
         }
 
         let htmlTemplate;
         try {
             htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
-            console.log("[SUCCESS] portfolio-template.html read successfully.");
         } catch (fileError) {
-            console.error("[FATAL ERROR] Could not read portfolio-template.html:", fileError);
             return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
         }
         
-        const pnl = capital > 0 ? total - capital : 0;
-        const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+        // --- [بداية الإصلاح] ---
+        let pnlAmount_str = "0.00";
+        let pnlPercent_str = "0.00";
+        let pnlSign = "";
+        let pnlClass = "";
+
+        if (capital > 0) {
+            const pnl = total - capital;
+            const pnlPercent = (pnl / capital) * 100;
+            pnlAmount_str = pnl.toFixed(2);
+            pnlPercent_str = pnlPercent.toFixed(2);
+            pnlSign = pnl >= 0 ? '+' : '';
+            pnlClass = pnl >= 0 ? 'positive' : 'negative';
+        } else {
+            pnlAmount_str = "N/A";
+            pnlPercent_str = "N/A";
+            pnlSign = "";
+            pnlClass = "";
+        }
+        // --- [نهاية الإصلاح] ---
+
         let assetsRows = '';
         const positions = loadPositions();
 
-        assets.forEach((asset, index) => {
+        assets.forEach(asset => {
             const percent = total > 0 ? (asset.value / total) * 100 : 0;
             let pnlText = '---';
             let avgBuyText = 'N/A';
@@ -181,42 +191,33 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             `;
         });
         
-        // 2. طباعة جزء الأصول للتأكد من أنه ليس فارغًا
-        console.log("[HTML PART] Generated assetsRows HTML:", assetsRows);
-        
         const finalHtml = htmlTemplate
             .replace('{{TIMESTAMP}}', new Date().toLocaleString('ar-EG'))
             .replace('{{TOTAL_VALUE}}', total.toFixed(2))
             .replace('{{CAPITAL}}', capital.toFixed(2))
-            .replace('{{PNL_CLASS}}', pnl >= 0 ? 'positive' : 'negative')
-            .replace('{{PNL_SIGN}}', pnl >= 0 ? '+' : '')
-            .replace('{{PNL_AMOUNT}}', pnl.toFixed(2))
-            .replace('{{PNL_PERCENT}}', pnlPercent.toFixed(2))
+            .replace('{{PNL_CLASS}}', pnlClass)
+            .replace('{{PNL_SIGN}}', pnlSign)
+            .replace('{{PNL_AMOUNT}}', pnlAmount_str)
+            .replace('{{PNL_PERCENT}}', pnlPercent_str)
             .replace('{{ASSETS_ROWS}}', assetsRows);
-
-        // 3. طباعة الـ HTML النهائي بالكامل قبل إرساله
-        console.log("--- [FINAL HTML] ---");
-        console.log(finalHtml);
-        console.log("--- [END FINAL HTML] ---");
 
         const response = await fetch('https://hcti.io/v1/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64') },
-            body: JSON.stringify({ html: finalHtml })
+            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" }) // إضافة خيار تحميل الخط لزيادة الموثوقية
         });
 
         const data = await response.json();
 
         if (data.url) {
-            console.log("[SUCCESS] Image generated successfully:", data.url);
             return { url: data.url };
         } else {
-            console.error("[API ERROR] HCTI API returned an error:", data);
-            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم (logs) للمزيد من التفاصيل." };
+            console.error("HCTI API Error:", data);
+            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم للمزيد من التفاصيل." };
         }
 
     } catch (error) {
-        console.error("[FATAL EXCEPTION] Exception in generatePortfolioImageUrl:", error);
+        console.error("Exception in generatePortfolioImageUrl:", error);
         return { error: "حدث خطأ برمجي غير متوقع أثناء إنشاء الصورة." };
     }
 }
