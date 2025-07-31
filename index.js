@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v31.1 (Reviewed & Corrected)
+// OKX Advanced Analytics Bot - v32 (Image View Option)
 // =================================================================
-// هذا الإصدار يطبق "النموذج التحليلي المنظم" ويصلح كافة الأخطاء.
+// هذا الإصدار يضيف خيار عرض المحفظة كصورة احترافية.
 // =================================================================
 
 const express = require("express");
@@ -86,17 +86,17 @@ function formatPortfolioMsg(assets, total, capital) {
 
     let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
     msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `━━━━━━━━━━━━\n`;
     msg += `📊 *الأداء الإجمالي:*\n`;
     msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
     msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
     msg += `   📈 *الربح/الخسارة (PnL):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `━━━━━━━━━━━━\n`;
     msg += `💎 *الأصــــــــول:*\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
-        msg += "\n"; // Add a newline before each asset for better spacing
+        msg += "\n";
         if (a.asset === "USDT") {
             msg += `╭─ *${a.asset}*\n`;
             msg += `╰─ 💰 *الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
@@ -118,11 +118,75 @@ function formatPortfolioMsg(assets, total, capital) {
             }
         }
         if (index < assets.length - 1) {
-            msg += `\n━━━━━━━━━━━━━━━━━━━━`;
+            msg += `\n━━━━━━━━━━━━`;
         }
     });
     return msg;
 }
+
+async function generatePortfolioImageUrl(assets, total, capital) {
+    try {
+        let htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
+        const pnl = capital > 0 ? total - capital : 0;
+        const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+        let assetsRows = '';
+        const positions = loadPositions();
+
+        assets.forEach(asset => {
+            const percent = total > 0 ? (asset.value / total) * 100 : 0;
+            let pnlText = '---';
+            let avgBuyText = 'N/A';
+            if (positions[asset.asset] && positions[asset.asset].avgBuyPrice > 0) {
+                avgBuyText = `$${positions[asset.asset].avgBuyPrice.toFixed(4)}`;
+                if(asset.asset !== 'USDT') {
+                    const avgBuyPrice = positions[asset.asset].avgBuyPrice;
+                    const assetPnl = asset.value - (avgBuyPrice * asset.amount);
+                    const assetPnlClass = assetPnl >= 0 ? 'positive' : 'negative';
+                    const assetPnlSign = assetPnl >= 0 ? '+' : '';
+                    pnlText = `<span class="pnl-asset ${assetPnlClass}">${assetPnlSign}$${assetPnl.toFixed(2)}</span>`;
+                }
+            }
+            
+            assetsRows += `
+                <div class="asset">
+                    <div class="asset-info">
+                        <div class="name">${asset.asset}</div>
+                        <div class="details">متوسط الشراء: ${avgBuyText}</div>
+                    </div>
+                    <div class="asset-values">
+                        <div class="value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
+                        <div class="details">${pnlText}</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        htmlTemplate = htmlTemplate
+            .replace('{{TIMESTAMP}}', new Date().toLocaleString('ar-EG'))
+            .replace('{{TOTAL_VALUE}}', total.toFixed(2))
+            .replace('{{CAPITAL}}', capital.toFixed(2))
+            .replace('{{PNL_CLASS}}', pnl >= 0 ? 'positive' : 'negative')
+            .replace('{{PNL_SIGN}}', pnl >= 0 ? '+' : '')
+            .replace('{{PNL_AMOUNT}}', pnl.toFixed(2))
+            .replace('{{PNL_PERCENT}}', pnlPercent.toFixed(2))
+            .replace('{{ASSETS_ROWS}}', assetsRows);
+
+        const response = await fetch('https://hcti.io/v1/image', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64')
+            },
+            body: JSON.stringify({ html: htmlTemplate })
+        });
+        const data = await response.json();
+        return data.url;
+    } catch (error) {
+        console.error("Error generating image:", error);
+        return null;
+    }
+}
+
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
@@ -146,7 +210,7 @@ function calculatePerformanceStats(history) {
     return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue };
 }
 
-// === دوال منطق البوت والمهام المجدولة ===
+// === دوال منطق البوت والمهام المجدولة (بدون تغيير) ===
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last)); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
 async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0); const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price, value, amount }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
@@ -342,6 +406,34 @@ bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
 
+    if (data === 'generate_portfolio_image') {
+        try {
+            await ctx.editMessageText("⏳ جارٍ إنشاء بطاقة المحفظة، قد يستغرق الأمر لحظات...", { reply_markup: undefined });
+            const prices = await getMarketPrices();
+            if (!prices) {
+                await ctx.editMessageText("❌ فشل جلب الأسعار.");
+                return;
+            }
+            const { assets, total, error } = await getPortfolio(prices);
+            if (error) {
+                await ctx.editMessageText(`❌ ${error}`);
+                return;
+            }
+            const capital = loadCapital();
+            const imageUrl = await generatePortfolioImageUrl(assets, total, capital);
+            if (imageUrl) {
+                await ctx.replyWithPhoto(imageUrl);
+                await ctx.deleteMessage(); // Delete the original text message
+            } else {
+                await ctx.editMessageText("❌ حدث خطأ أثناء إنشاء الصورة.");
+            }
+        } catch (e) {
+            console.error("Error handling image generation callback:", e);
+            await ctx.reply("❌ حدث خطأ غير متوقع.");
+        }
+        return;
+    }
+    
     if (data.startsWith("publish_")) {
         const [, type, asset, ...params] = data.split('_');
         let finalRecommendation = "";
@@ -493,7 +585,20 @@ bot.on("message:text", async (ctx) => {
     }
 
     switch (text) {
-        case "📊 عرض المحفظة": await ctx.reply('⏳ لحظات...'); const prices = await getMarketPrices(); if (!prices) return await ctx.reply("❌ فشل جلب الأسعار."); const { assets, total, error } = await getPortfolio(prices); if (error) { await ctx.reply(`❌ ${error}`); } else { const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); } break;
+        case "📊 عرض المحفظة":
+            await ctx.reply('⏳ لحظات...');
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ فشل جلب الأسعار.");
+            const { assets, total, error } = await getPortfolio(prices);
+            if (error) {
+                await ctx.reply(`❌ ${error}`);
+            } else {
+                const capital = loadCapital();
+                const msg = formatPortfolioMsg(assets, total, capital);
+                const imageButtonKeyboard = new InlineKeyboard().text("🖼️ عرض كصورة", "generate_portfolio_image");
+                await ctx.reply(msg, { parse_mode: "Markdown", reply_markup: imageButtonKeyboard });
+            }
+            break;
         case "📈 أداء المحفظة":
             const keyboard = new InlineKeyboard()
                 .text("آخر 24 ساعة", "chart_24h")
