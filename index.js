@@ -86,7 +86,7 @@ function formatPortfolioMsg(assets, total, capital) {
 
     let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
     msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `━━━━━━━━━━━━━━━━━━\n`;
     msg += `📊 *الأداء الإجمالي:*\n`;
     msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
     msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
