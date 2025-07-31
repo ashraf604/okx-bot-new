@@ -124,19 +124,26 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// ==== النسخة النهائية لدالة إنشاء الصورة ====
+// ==== دالة التشخيص النهائية - استبدل الدالة الحالية بهذه ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
+        console.log("--- [START] Image Generation ---");
+
+        // 1. طباعة البيانات الأولية للتأكد من أنها سليمة
+        console.log(`[DATA] Total: ${total}, Capital: ${capital}`);
+        console.log(`[DATA] Assets Count: ${assets.length}`);
+
         if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
-            console.error("HCTI_USER_ID or HCTI_API_KEY is missing from .env file.");
+            console.error("[ERROR] HCTI keys are missing from .env");
             return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
         }
 
         let htmlTemplate;
         try {
             htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
+            console.log("[SUCCESS] portfolio-template.html read successfully.");
         } catch (fileError) {
-            console.error("Could not read portfolio-template.html:", fileError);
+            console.error("[FATAL ERROR] Could not read portfolio-template.html:", fileError);
             return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
         }
         
@@ -145,7 +152,7 @@ async function generatePortfolioImageUrl(assets, total, capital) {
         let assetsRows = '';
         const positions = loadPositions();
 
-        assets.forEach(asset => {
+        assets.forEach((asset, index) => {
             const percent = total > 0 ? (asset.value / total) * 100 : 0;
             let pnlText = '---';
             let avgBuyText = 'N/A';
@@ -174,7 +181,10 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             `;
         });
         
-        htmlTemplate = htmlTemplate
+        // 2. طباعة جزء الأصول للتأكد من أنه ليس فارغًا
+        console.log("[HTML PART] Generated assetsRows HTML:", assetsRows);
+        
+        const finalHtml = htmlTemplate
             .replace('{{TIMESTAMP}}', new Date().toLocaleString('ar-EG'))
             .replace('{{TOTAL_VALUE}}', total.toFixed(2))
             .replace('{{CAPITAL}}', capital.toFixed(2))
@@ -184,27 +194,30 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             .replace('{{PNL_PERCENT}}', pnlPercent.toFixed(2))
             .replace('{{ASSETS_ROWS}}', assetsRows);
 
+        // 3. طباعة الـ HTML النهائي بالكامل قبل إرساله
+        console.log("--- [FINAL HTML] ---");
+        console.log(finalHtml);
+        console.log("--- [END FINAL HTML] ---");
+
         const response = await fetch('https://hcti.io/v1/image', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64')
-            },
-            body: JSON.stringify({ html: htmlTemplate })
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64') },
+            body: JSON.stringify({ html: finalHtml })
         });
 
         const data = await response.json();
 
         if (data.url) {
+            console.log("[SUCCESS] Image generated successfully:", data.url);
             return { url: data.url };
         } else {
-            console.error("HCTI API Error:", data);
+            console.error("[API ERROR] HCTI API returned an error:", data);
             return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم (logs) للمزيد من التفاصيل." };
         }
 
     } catch (error) {
-        console.error("Exception in generatePortfolioImageUrl:", error);
-        return { error: "حدث خطأ غير متوقع أثناء الاتصال بخدمة الصور." };
+        console.error("[FATAL EXCEPTION] Exception in generatePortfolioImageUrl:", error);
+        return { error: "حدث خطأ برمجي غير متوقع أثناء إنشاء الصورة." };
     }
 }
 function createChartUrl(history, periodLabel) {
