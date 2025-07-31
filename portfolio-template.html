@@ -2,126 +2,135 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
         
         body { 
             font-family: 'Cairo', sans-serif; 
-            background-color: #1a1c22; 
+            background-color: #131722; /* لون الخلفية الرئيسي الداكن */
             margin: 0;
             padding: 0;
-        }
-        .card { 
-            background-color: #2a2d35;
-            color: #e5e7eb;
-            border-radius: 15px; 
-            padding: 25px; 
-            width: 600px; 
-            box-sizing: border-box;
-            border: 1px solid #444;
             direction: rtl;
         }
-        .pnl-positive { color: #22c55e; }
-        .pnl-negative { color: #ef4444; }
+        .card { 
+            background-color: #1e222d; /* لون البطاقة أغمق قليلاً */
+            color: #d1d4dc;
+            padding: 25px; 
+            width: 650px; 
+            box-sizing: border-box;
+        }
+        .pnl-positive { color: #26a69a; } /* أخضر تداول */
+        .pnl-negative { color: #ef5350; } /* أحمر تداول */
 
-        /* Table Styles */
-        .main-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .main-table h2 {
-            margin: 0; 
-            color: #fff;
-            text-align: right;
-        }
-        .main-table .timestamp {
-            font-size: 12px; 
-            color: #9ca3af;
-            text-align: left;
-        }
-        .stat-item {
-            background-color: #373a43; 
-            padding: 15px; 
-            border-radius: 10px; 
+        /* Header */
+        .header {
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #363c4e;
             text-align: center;
         }
-        .stat-item h3 {
-            margin: 0 0 5px 0; 
-            font-size: 14px; 
-            color: #9ca3af; 
-            font-weight: 400;
-        }
-        .stat-item p {
-            margin: 0; 
-            font-size: 20px; 
+        .header h1 {
+            margin: 0;
+            color: #fff;
+            font-size: 28px;
             font-weight: 700;
         }
+
+        /* Stats Section */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .stat-box {
+            background-color: #2a2e39;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .stat-box h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #8c92a2;
+            font-weight: 600;
+        }
+        .stat-box p {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .stat-box-full {
+             grid-column: 1 / -1; /* تجعل هذا العنصر يمتد على عرض الشبكة بالكامل */
+             text-align: center;
+        }
+
+        /* Assets Section */
         .assets-title {
-            font-size: 18px; 
-            font-weight: 700; 
-            color: #fff; 
-            padding: 15px 0;
-            border-bottom: 1px solid #444;
-            border-top: 1px solid #444;
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #363c4e;
         }
-        .asset-name {
-            font-size: 18px; 
-            font-weight: 700; 
+        .asset {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 5px;
+            border-bottom: 1px solid #2a2e39;
+        }
+        .asset:last-child {
+            border-bottom: none;
+        }
+        .asset-left .name {
+            font-size: 20px;
+            font-weight: 700;
             color: #fff;
         }
-        .asset-details {
-            font-size: 13px; 
-            color: #9ca3af;
+        .asset-left .details {
+            font-size: 14px;
+            color: #8c92a2;
         }
-        .asset-value {
-            font-size: 18px; 
-            font-weight: 700; 
+        .asset-right {
+            text-align: left;
+        }
+        .asset-right .value {
+            font-size: 20px;
+            font-weight: 700;
             color: #fff;
-            text-align: left;
         }
-        .asset-pnl {
-            font-size: 13px;
-            text-align: left;
+        .asset-right .pnl {
+            font-size: 14px;
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
     <div class="card">
-        <table class="main-table">
-            <tr>
-                <td style="padding-bottom: 20px;"><h2>ملخص المحفظة</h2></td>
-                <td style="padding-bottom: 20px;" class="timestamp">{{TIMESTAMP}}</td>
-            </tr>
-            <tr>
-                <td colspan="2">
-                    <table style="width: 100%;">
-                        <tr>
-                            <td style="width: 33%; padding: 5px;">
-                                <div class="stat-item">
-                                    <h3>القيمة الحالية</h3>
-                                    <p>${{TOTAL_VALUE}}</p>
-                                </div>
-                            </td>
-                            <td style="width: 33%; padding: 5px;">
-                                <div class="stat-item">
-                                    <h3>رأس المال</h3>
-                                    <p>${{CAPITAL}}</p>
-                                </div>
-                            </td>
-                            <td style="width: 33%; padding: 5px;">
-                                <div class="stat-item">
-                                    <h3>الربح/الخسارة</h3>
-                                    <p class="pnl {{PNL_CLASS}}">{{PNL_SIGN}}${{PNL_AMOUNT}} ({{PNL_PERCENT}}%)</p>
-                                </div>
-                            </td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-            <tr>
-                <td colspan="2" class="assets-title">الأصول</td>
-            </tr>
-            {{ASSETS_ROWS}}
-        </table>
+        <div class="header">
+            <h1>ملخص المحفظة</h1>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-box">
+                <h3>القيمة الإجمالية</h3>
+                <p>${{TOTAL_VALUE}}</p>
+            </div>
+            <div class="stat-box">
+                <h3>رأس المال</h3>
+                <p>${{CAPITAL}}</p>
+            </div>
+            <div class="stat-box stat-box-full">
+                <h3>إجمالي الربح والخسارة (PnL)</h3>
+                <p class="{{PNL_CLASS}}">{{PNL_SIGN}}${{PNL_AMOUNT}} ({{PNL_PERCENT}}%)</p>
+            </div>
+        </div>
+
+        <div class="assets-title">الأصول</div>
+        
+        {{ASSETS_ROWS}}
+
     </div>
 </body>
 </html>
