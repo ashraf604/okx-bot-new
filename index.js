@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v31 (Aesthetic Overhaul)
+// OKX Advanced Analytics Bot - v31.1 (Reviewed & Corrected)
 // =================================================================
-// هذا الإصدار يطبق "النموذج التحليلي المنظم" على جميع رسائل البوت.
+// هذا الإصدار يطبق "النموذج التحليلي المنظم" ويصلح كافة الأخطاء.
 // =================================================================
 
 const express = require("express");
@@ -90,12 +90,13 @@ function formatPortfolioMsg(assets, total, capital) {
     msg += `📊 *الأداء الإجمالي:*\n`;
     msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
     msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
-    msg += `   📈 *الربح/الخسارة (PnL):* ${pnlEmoji} \`${pnlSign}$${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += `   📈 *الربح/الخسارة (PnL):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
     msg += `━━━━━━━━━━━━\n`;
-    msg += `💎 *الأصــــــــول:*\n\n`;
+    msg += `💎 *الأصــــــــول:*\n`;
 
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
+        msg += "\n"; // Add a newline before each asset for better spacing
         if (a.asset === "USDT") {
             msg += `╭─ *${a.asset}*\n`;
             msg += `╰─ 💰 *الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
@@ -111,13 +112,13 @@ function formatPortfolioMsg(assets, total, capital) {
                 const assetPnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
                 const assetPnlSign = assetPnl >= 0 ? '+' : '';
                 msg += `├─ 🛒 *متوسط الشراء:* \`$${avgBuyPrice.toFixed(4)}\`\n`;
-                msg += `╰─ 📉 *الربح/الخسارة:* ${assetPnlEmoji} \`${assetPnlSign}$${assetPnl.toFixed(2)}\` (\`${assetPnlSign}${assetPnlPercent.toFixed(2)}%\`)`;
+                msg += `╰─ 📉 *الربح/الخسارة:* ${assetPnlEmoji} \`${assetPnlSign}${assetPnl.toFixed(2)}\` (\`${assetPnlSign}${assetPnlPercent.toFixed(2)}%\`)`;
             } else {
                 msg += `╰─ 🛒 *متوسط الشراء:* لم يتم تسجيله`;
             }
         }
         if (index < assets.length - 1) {
-            msg += `\n━━━━━━━━━━━━\n`;
+            msg += `\n━━━━━━━━━━━━`;
         }
     });
     return msg;
@@ -209,7 +210,6 @@ async function monitorBalanceChanges() {
             callbackData = `publish_buy_${asset}_${avgPrice.toFixed(4)}_${entryOfPortfolio.toFixed(2)}_${entryOfCash.toFixed(2)}_${portfolioPercentage.toFixed(2)}`;
 
         } else { // بيع
-            const remainingCashAfterSale = currentBalance['USDT'] || 0;
             if (currAmount < 0.0001) { // إغلاق مركز
                 publicRecommendationText = `🔔 **توصية تداول جديدة | إغلاق مركز** 🔴\n\n` +
                     `🔸 **العملة:** \`${asset}/USDT\`\n\n` +
@@ -289,13 +289,15 @@ async function sendMovementAlertsMenu(ctx) { const alertSettings = loadAlertSett
 bot.use(async (ctx, next) => { if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); } else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); } });
 bot.command("start", async (ctx) => { await ctx.reply("🤖 *بوت OKX التحليلي المتكامل*", { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
+
 bot.command("pnl", async (ctx) => {
     const args = ctx.match.trim().split(/\s+/);
     if (args.length !== 3 || args[0] === '') {
         return await ctx.reply(
             `❌ *صيغة غير صحيحة*\n\n` +
             `*يرجى استخدام الصيغة الصحيحة للأمر.*\n\n` +
-            `*مثال:*\n`/pnl <شراء> <بيع> <كمية>\``, { parse_mode: "Markdown" }
+            `*مثال:*\n\`/pnl <شراء> <بيع> <كمية>\``,
+            { parse_mode: "Markdown" }
         );
     }
     const [buyPrice, sellPrice, quantity] = args.map(parseFloat);
@@ -307,6 +309,7 @@ bot.command("pnl", async (ctx) => {
     const profitOrLoss = totalSaleValue - totalInvestment;
     const pnlPercentage = (profitOrLoss / totalInvestment) * 100;
     const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻";
+    const pnlSign = profitOrLoss >= 0 ? '+' : '';
 
     const responseMessage = `🧮 *نتيجة حساب الربح والخسارة*\n\n` +
         `📝 **المدخلات:**\n` +
@@ -316,10 +319,11 @@ bot.command("pnl", async (ctx) => {
         `📊 **النتائج:**\n` +
         `   - *إجمالي الشراء:* \`$${totalInvestment.toLocaleString()}\`\n` +
         `   - *إجمالي البيع:* \`$${totalSaleValue.toLocaleString()}\`\n` +
-        `   - *صافي الربح:* \`$${profitOrLoss.toLocaleString()}\` (\`${pnlPercentage.toFixed(2)}%\`)\n\n` +
+        `   - *صافي الربح:* \`${pnlSign}${profitOrLoss.toLocaleString()}\` (\`${pnlSign}${pnlPercentage.toFixed(2)}%\`)\n\n` +
         `**${resultStatus}**`;
     await ctx.reply(responseMessage, { parse_mode: "Markdown" });
 });
+
 bot.command("avg", async (ctx) => {
     const args = ctx.match.trim().split(/\s+/);
     if (args.length !== 2 || args[0] === '') {
