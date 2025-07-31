@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v33 (Final Build - Grammy Fix)
+// OKX Advanced Analytics Bot - v34 (Final Build - Restore Fix)
 // =================================================================
-// هذا الإصدار هو النسخة النهائية مع إصلاح توافقية مكتبة grammy.
+// This version includes the definitive fix for the backup restore functionality.
 // =================================================================
 
 const express = require("express");
@@ -11,14 +11,14 @@ const crypto = require("crypto");
 const fs = require("fs");
 require("dotenv").config();
 
-// --- إعدادات البوت الأساسية ---
+// --- Bot Basic Settings ---
 const app = express();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 
-// --- ملفات تخزين البيانات ---
+// --- Data Storage Files ---
 const DATA_DIR = "./data";
 const CAPITAL_FILE = `${DATA_DIR}/data_capital.json`;
 const ALERTS_FILE = `${DATA_DIR}/data_alerts.json`;
@@ -30,7 +30,7 @@ const POSITIONS_FILE = `${DATA_DIR}/data_positions.json`;
 const ALERT_SETTINGS_FILE = `${DATA_DIR}/data_alert_settings.json`;
 const PRICE_TRACKER_FILE = `${DATA_DIR}/data_price_tracker.json`;
 
-// --- متغيرات الحالة والمؤشرات ---
+// --- State and Interval Variables ---
 let waitingState = null;
 let balanceMonitoringInterval = null;
 let previousBalanceState = {};
@@ -39,7 +39,7 @@ let dailyJobsInterval = null;
 let hourlyJobsInterval = null;
 let movementCheckInterval = null;
 
-// === دوال مساعدة وإدارة الملفات ===
+// === Helper and File Management Functions ===
 function readJsonFile(filePath, defaultValue) { try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR); if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf-8')); return defaultValue; } catch (error) { console.error(`Error reading ${filePath}:`, error); return defaultValue; } }
 function writeJsonFile(filePath, data) { try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR); fs.writeFileSync(filePath, JSON.stringify(data, null, 2)); } catch (error) { console.error(`Error writing to ${filePath}:`, error); } }
 const loadCapital = () => readJsonFile(CAPITAL_FILE, 0);
@@ -61,7 +61,7 @@ const saveAlertSettings = (settings) => writeJsonFile(ALERT_SETTINGS_FILE, setti
 const loadPriceTracker = () => readJsonFile(PRICE_TRACKER_FILE, { totalPortfolioValue: 0, assets: {} });
 const savePriceTracker = (tracker) => writeJsonFile(PRICE_TRACKER_FILE, tracker);
 
-// === دالة مساعدة لإرسال رسائل التشخيص ===
+// === Debug Message Helper ===
 async function sendDebugMessage(message) {
     const settings = loadSettings();
     if (settings.debugMode) {
@@ -73,10 +73,10 @@ async function sendDebugMessage(message) {
     }
 }
 
-// === دوال API ===
+// === API Functions ===
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
-// === دوال العرض والمساعدة ===
+// === Display and Helper Functions ===
 function formatPortfolioMsg(assets, total, capital) { const positions = loadPositions(); let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let msg = `📊 *ملخص المحفظة* 📊\n\n`; msg += `💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`; msg += `💼 *رأس المال الأساسي:* \`$${capital.toFixed(2)}\`\n`; msg += `📈 *الربح/الخسارة (PnL):* ${pnl >= 0 ? '🟢' : '🔴'} \`$${pnl.toFixed(2)}\` (\`${pnlPercent.toFixed(2)}%\`)\n`; msg += `━━━━━━━━━━━━━━━━━━`; assets.forEach((a, index) => { let percent = total > 0 ? ((a.value / total) * 100).toFixed(2) : 0; if (a.asset === "USDT") { msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `╰─💰 القيمة: \`$${a.value.toFixed(2)}\``; } else { msg += `\n\n╭─💎 *${a.asset}* (\`${percent}%\`)\n`; msg += `├─💰 القيمة: \`$${a.value.toFixed(2)}\`\n`; msg += `├─📈 السعر الحالي: \`$${a.price.toFixed(4)}\`\n`; if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) { const avgBuyPrice = positions[a.asset].avgBuyPrice; msg += `├─🛒 متوسط الشراء: \`$${avgBuyPrice.toFixed(4)}\`\n`; const totalCost = avgBuyPrice * a.amount; const assetPnl = a.value - totalCost; const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0; const pnlEmoji = assetPnl >= 0 ? '🟢' : '🔴'; msg += `╰─📉 الربح/الخسارة: ${pnlEmoji} \`$${assetPnl.toFixed(2)}\` (\`${assetPnlPercent.toFixed(2)}%\`)`; } else { msg += `╰─🛒 متوسط الشراء: لم يتم تسجيله`; } } if (index < assets.length - 1) { msg += `\n━━━━━━━━━━━━━━━━━━`; } }); msg += `\n\n🕒 *آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`; return msg; }
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
@@ -101,7 +101,7 @@ function calculatePerformanceStats(history) {
     return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue };
 }
 
-// === دوال منطق البوت والمهام المجدولة ===
+// === Bot Logic and Scheduled Tasks ===
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last)); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
 async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0); const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price, value, amount }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
@@ -119,7 +119,7 @@ async function sendSettingsMenu(ctx) {
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
         .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-        .text("💾 نسخ احتياطي واستعادة", "backup_restore").row()
+        .text("💾 نسخ احتياطي", "backup_restore").row()
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
         .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
@@ -138,10 +138,10 @@ bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); 
 bot.command("avg", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 2 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "استخدم: `/avg <SYMBOL> <PRICE>`\n\n" + "*مثال:*\n`/avg OP 1.50`", { parse_mode: "Markdown" }); } const [symbol, priceStr] = args; const price = parseFloat(priceStr); if (isNaN(price) || price <= 0) { return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا."); } const positions = loadPositions(); positions[symbol.toUpperCase()] = { avgBuyPrice: price }; savePositions(positions); await ctx.reply(`✅ تم تحديث متوسط شراء *${symbol.toUpperCase()}* إلى \`$${price.toFixed(4)}\`.`, { parse_mode: "Markdown" }); });
 
 // --- معالج النسخ الاحتياطي (الاستعادة) ---
-bot.on("message:forward_origin", async (ctx) => {
+bot.on(":forward", async (ctx) => {
     if (ctx.message.text && ctx.message.text.startsWith("OKX_BOT_BACKUP_V1:")) {
         try {
-            const encodedData = ctx.message.text.split(':')[1];
+            const encodedData = ctx.message.text.split(':')[1].trim();
             const decodedString = Buffer.from(encodedData, 'base64').toString('utf8');
             const backupData = JSON.parse(decodedString);
 
@@ -194,11 +194,11 @@ bot.on("callback_query:data", async (ctx) => {
         } else if (period === '7d') {
             history = loadHistory();
             periodLabel = "آخر 7 أيام";
-            periodData = history.slice(-7).map(h => ({ label: h.date, total: h.total }));
+            periodData = history.slice(-7).map(h => ({ label: h.date.slice(5), total: h.total }));
         } else if (period === '30d') {
             history = loadHistory();
             periodLabel = "آخر 30 يومًا";
-            periodData = history.slice(-30).map(h => ({ label: h.date, total: h.total }));
+            periodData = history.slice(-30).map(h => ({ label: h.date.slice(5), total: h.total }));
         }
 
         const stats = calculatePerformanceStats(periodData);
@@ -252,7 +252,7 @@ bot.on("callback_query:data", async (ctx) => {
                 const updatedKeyboard = new InlineKeyboard()
                     .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
                     .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-                    .text("💾 نسخ احتياطي واستعادة", "backup_restore").row()
+                    .text("💾 نسخ احتياطي", "backup_restore").row()
                     .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
                     .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
                     .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
