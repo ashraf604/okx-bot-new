@@ -124,7 +124,7 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// ==== النسخة النهائية والإنتاجية لدالة إنشاء الصورة ====
+// ==== النسخة النهائية لدالة إنشاء الصورة (مع الجداول) ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
         if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
@@ -138,7 +138,6 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
         }
         
-        // --- [بداية الإصلاح] ---
         let pnlAmount_str = "0.00";
         let pnlPercent_str = "0.00";
         let pnlSign = "";
@@ -157,7 +156,6 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             pnlSign = "";
             pnlClass = "";
         }
-        // --- [نهاية الإصلاح] ---
 
         let assetsRows = '';
         const positions = loadPositions();
@@ -173,21 +171,21 @@ async function generatePortfolioImageUrl(assets, total, capital) {
                     const assetPnl = asset.value - (avgBuyPrice * asset.amount);
                     const assetPnlClass = assetPnl >= 0 ? 'positive' : 'negative';
                     const assetPnlSign = assetPnl >= 0 ? '+' : '';
-                    pnlText = `<span class="pnl-asset ${assetPnlClass}">${assetPnlSign}$${assetPnl.toFixed(2)}</span>`;
+                    pnlText = `<span class="pnl-${assetPnlClass}">${assetPnlSign}$${assetPnl.toFixed(2)}</span>`;
                 }
             }
             
             assetsRows += `
-                <div class="asset">
-                    <div class="asset-info">
-                        <div class="name">${asset.asset}</div>
-                        <div class="details">متوسط الشراء: ${avgBuyText}</div>
-                    </div>
-                    <div class="asset-values">
-                        <div class="value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
-                        <div class="details">${pnlText}</div>
-                    </div>
-                </div>
+                <tr style="border-bottom: 1px solid #373a43;">
+                    <td style="padding: 12px 0;">
+                        <div class="asset-name">${asset.asset}</div>
+                        <div class="asset-details">متوسط الشراء: ${avgBuyText}</div>
+                    </td>
+                    <td style="padding: 12px 0;">
+                        <div class="asset-value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
+                        <div class="asset-pnl">${pnlText}</div>
+                    </td>
+                </tr>
             `;
         });
         
@@ -204,7 +202,7 @@ async function generatePortfolioImageUrl(assets, total, capital) {
         const response = await fetch('https://hcti.io/v1/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64') },
-            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" }) // إضافة خيار تحميل الخط لزيادة الموثوقية
+            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" })
         });
 
         const data = await response.json();
