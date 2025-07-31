@@ -1,7 +1,7 @@
 // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-// OKX Advanced Analytics Bot - v31 (Backup & Restore System)
+// OKX Advanced Analytics Bot - v31.1 (Backup & Restore Fix)
 // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-// This version adds a comprehensive backup and restore system.
+// This version fixes the listener for the restore functionality.
 // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 const express = require("express");
@@ -119,7 +119,7 @@ async function sendSettingsMenu(ctx) {
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
         .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-        .text("💾 نسخ احتياطي واستعادة", "backup_restore").row() // <<< New Button
+        .text("💾 نسخ احتياطي واستعادة", "backup_restore").row()
         .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
@@ -135,8 +135,6 @@ bot.command("start", async (ctx) => { await ctx.reply("🤖 *بوت OKX التح
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
 bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "`/pnl <شراء> <بيع> <كمية>`\n\n" + "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن القيم أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const responseMessage = `*📊 نتيجة الحساب:*\n\n- إجمالي الشراء: \`$${totalInvestment.toLocaleString()}\`\n- إجمالي البيع: \`$${totalSaleValue.toLocaleString()}\`\n\n- الربح/الخسارة: \`$${profitOrLoss.toLocaleString()}\`\n- النسبة: \`${pnlPercentage.toFixed(2)}%\`\n\n*النتيجة: ${resultStatus}*`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
 bot.command("avg", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 2 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "استخدم: `/avg <SYMBOL> <PRICE>`\n\n" + "*مثال:*\n`/avg OP 1.50`", { parse_mode: "Markdown" }); } const [symbol, priceStr] = args; const price = parseFloat(priceStr); if (isNaN(price) || price <= 0) { return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا."); } const positions = loadPositions(); positions[symbol.toUpperCase()] = { avgBuyPrice: price }; savePositions(positions); await ctx.reply(`✅ تم تحديث متوسط شراء *${symbol.toUpperCase()}* إلى \`$${price.toFixed(4)}\`.`, { parse_mode: "Markdown" }); });
-
-// --- Backup and Restore Commands ---
 bot.command("backup", (ctx) => {
     const backupData = {
         capital: loadCapital(),
@@ -148,14 +146,14 @@ bot.command("backup", (ctx) => {
     ctx.reply(`📋 *نسخة احتياطية*\n\nقم بنسخ هذه الرسالة والاحتفاظ بها. لاستعادة الإعدادات، قم بعمل "إعادة توجيه" (Forward) لهذه الرسالة إلى البوت.\n\n\`\`\`\n${backupString}\n\`\`\``, { parse_mode: "Markdown" });
 });
 
-bot.on("message:forward_date", async (ctx) => {
+bot.on("message:forward_origin", async (ctx) => {
     if (ctx.message.text && ctx.message.text.startsWith("OKX_BOT_BACKUP_V1:")) {
         try {
             const encodedData = ctx.message.text.split(':')[1];
             const decodedString = Buffer.from(encodedData, 'base64').toString('utf8');
             const backupData = JSON.parse(decodedString);
 
-            if (backupData.capital) saveCapital(backupData.capital);
+            if (backupData.capital !== undefined) saveCapital(backupData.capital);
             if (backupData.positions) savePositions(backupData.positions);
             if (backupData.alertSettings) saveAlertSettings(backupData.alertSettings);
             if (backupData.settings) saveSettings(backupData.settings);
@@ -167,7 +165,6 @@ bot.on("message:forward_date", async (ctx) => {
         }
     }
 });
-
 
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
@@ -201,7 +198,7 @@ bot.on("callback_query:data", async (ctx) => {
         if (period === '24h') {
             history = loadHourlyHistory();
             periodLabel = "آخر 24 ساعة";
-            periodData = history.slice(-24);
+            periodData = history.slice(-24).map(h => ({ label: h.label, total: h.total }));
         } else if (period === '7d') {
             history = loadHistory();
             periodLabel = "آخر 7 أيام";
@@ -245,6 +242,7 @@ bot.on("callback_query:data", async (ctx) => {
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "set_capital": waitingState = 'set_capital'; await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); break;
         case "delete_alert": waitingState = 'delete_alert'; await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); break;
+        case "backup_restore": await ctx.reply("📋 *النسخ الاحتياطي والاستعادة*\n\n- لإنشاء نسخة احتياطية من إعداداتك، أرسل الأمر: `/backup`\n- لاستعادة نسخة سابقة، قم بعمل 'إعادة توجيه' (Forward) لرسالة الباك أب إلى البوت.", { parse_mode: "Markdown"}); break;
         case "toggle_summary":
         case "toggle_autopost":
         case "toggle_debug":
