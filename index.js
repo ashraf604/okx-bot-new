@@ -93,10 +93,10 @@ function formatPortfolioMsg(assets, total, capital) {
 
         if (a.asset === "USDT") {
             // قسم خاص لـ USDT
-            msg += `╠═════💎 ${a.asset} (${percent}%) ═════╣\n`;
+            msg += `╠═══💎 ${a.asset} (${percent}%) ════╣\n`;
             msg += `  └─ **القيمة:** \`$${a.value.toFixed(2)}\`\n\n`;
         } else {
-            msg += `╠═════💎 ${a.asset} (${percent}%) ═════╣\n`;
+            msg += `╠══💎 ${a.asset} (${percent}%) ══╣\n`;
             msg += `  ├─ **القيمة:** \`$${a.value.toFixed(2)}\`\n`;
 
             if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
@@ -119,7 +119,7 @@ function formatPortfolioMsg(assets, total, capital) {
         msg = msg.slice(0, -2);
     }
     
-    msg += `\n╚════════════════════════════╝\n`;
+    msg += `\n╚═══════════════╝\n`;
     msg += `*🕒 آخر تحديث:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
     
     return msg;
