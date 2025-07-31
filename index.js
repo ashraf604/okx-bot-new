@@ -1,8 +1,8 @@
-// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-// OKX Advanced Analytics Bot - v31.1 (Backup & Restore Fix)
-// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-// This version fixes the listener for the restore functionality.
-// =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+// =================================================================
+// OKX Advanced Analytics Bot - v32 (Final Reviewed Build)
+// =================================================================
+// This is the final, fully reviewed version with all features and fixes.
+// =================================================================
 
 const express = require("express");
 const { Bot, Keyboard, InlineKeyboard, webhookCallback } = require("grammy");
@@ -112,7 +112,7 @@ async function runDailyJobs() { const settings = loadSettings(); if (!settings.d
 async function runHourlyJobs() { const prices = await getMarketPrices(); if (!prices) return; const { total, error } = await getPortfolio(prices); if (error) return; const hourlyHistory = loadHourlyHistory(); const now = new Date(); const label = `${now.getHours()}:00`; hourlyHistory.push({ label: label, total: total }); if (hourlyHistory.length > 24) hourlyHistory.shift(); saveHourlyHistory(hourlyHistory); console.log(`[✅ Hourly Summary]: ${label} - $${total.toFixed(2)}`); }
 async function checkPriceMovements() { await sendDebugMessage("بدء دورة التحقق من حركة الأسعار..."); const alertSettings = loadAlertSettings(); const priceTracker = loadPriceTracker(); const prices = await getMarketPrices(); if (!prices) { await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة."); return; } const { assets, total: currentTotalValue, error } = await getPortfolio(prices); if (error || currentTotalValue === undefined) { await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة."); return; } if (priceTracker.totalPortfolioValue === 0) { priceTracker.totalPortfolioValue = currentTotalValue; assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; }); savePriceTracker(priceTracker); await sendDebugMessage("تم تسجيل قيم تتبع الأسعار الأولية."); return; } let trackerUpdated = false; const lastTotalValue = priceTracker.totalPortfolioValue; if (lastTotalValue > 0) { const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100; if (Math.abs(changePercent) >= alertSettings.global) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.totalPortfolioValue = currentTotalValue; trackerUpdated = true; } } for (const asset of assets) { if (asset.asset === 'USDT' || !asset.price) continue; const lastPrice = priceTracker.assets[asset.asset]; if (lastPrice) { const changePercent = ((asset.price - lastPrice) / lastPrice) * 100; const threshold = alertSettings.overrides[asset.asset] || alertSettings.global; if (Math.abs(changePercent) >= threshold) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${asset.price.toFixed(4)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } else { priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } if (trackerUpdated) { savePriceTracker(priceTracker); await sendDebugMessage("تم تحديث متتبع الأسعار بعد إرسال تنبيه."); } else { await sendDebugMessage("لا توجد حركات أسعار تتجاوز الحد."); } }
 
-// --- Keyboards and Menus ---
+// --- لوحات المفاتيح والقوائم ---
 const mainKeyboard = new Keyboard().text("📊 عرض المحفظة").text("📈 أداء المحفظة").row().text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row().text("🧮 حاسبة الربح والخسارة").row().text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
 async function sendSettingsMenu(ctx) {
     const settings = loadSettings();
@@ -120,6 +120,7 @@ async function sendSettingsMenu(ctx) {
         .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
         .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
         .text("💾 نسخ احتياطي واستعادة", "backup_restore").row()
+        .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
         .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
         .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
@@ -129,31 +130,21 @@ async function sendSettingsMenu(ctx) {
 async function sendPositionsMenu(ctx) { const positionsKeyboard = new InlineKeyboard().text("➕ إضافة أو تعديل مركز", "add_position").row().text("📄 عرض كل المراكز", "view_positions").row().text("🗑️ حذف مركز", "delete_position").row().text("🔙 العودة للإعدادات", "back_to_settings"); await ctx.editMessageText("💼 *إدارة متوسطات الشراء*", { parse_mode: "Markdown", reply_markup: positionsKeyboard }); }
 async function sendMovementAlertsMenu(ctx) { const alertSettings = loadAlertSettings(); const text = `🚨 *إدارة تنبيهات الحركة*\n\n- النسبة العامة الحالية: \`${alertSettings.global}%\`\n- يمكنك تعيين نسبة مختلفة لعملة معينة.`; const keyboard = new InlineKeyboard() .text("📊 تعديل النسبة العامة", "set_global_alert").row() .text("💎 تعديل نسبة عملة", "set_coin_alert").row() .text("📄 عرض كل الإعدادات", "view_movement_alerts").row() .text("🔙 العودة للإعدادات الرئيسية", "back_to_settings"); try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard }); } }
 
-// --- Command and Message Handlers ---
+// --- معالجات الأوامر والرسائل ---
 bot.use(async (ctx, next) => { if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); } else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); } });
 bot.command("start", async (ctx) => { await ctx.reply("🤖 *بوت OKX التحليلي المتكامل*", { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
 bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "`/pnl <شراء> <بيع> <كمية>`\n\n" + "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن القيم أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const responseMessage = `*📊 نتيجة الحساب:*\n\n- إجمالي الشراء: \`$${totalInvestment.toLocaleString()}\`\n- إجمالي البيع: \`$${totalSaleValue.toLocaleString()}\`\n\n- الربح/الخسارة: \`$${profitOrLoss.toLocaleString()}\`\n- النسبة: \`${pnlPercentage.toFixed(2)}%\`\n\n*النتيجة: ${resultStatus}*`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
 bot.command("avg", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 2 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "استخدم: `/avg <SYMBOL> <PRICE>`\n\n" + "*مثال:*\n`/avg OP 1.50`", { parse_mode: "Markdown" }); } const [symbol, priceStr] = args; const price = parseFloat(priceStr); if (isNaN(price) || price <= 0) { return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا."); } const positions = loadPositions(); positions[symbol.toUpperCase()] = { avgBuyPrice: price }; savePositions(positions); await ctx.reply(`✅ تم تحديث متوسط شراء *${symbol.toUpperCase()}* إلى \`$${price.toFixed(4)}\`.`, { parse_mode: "Markdown" }); });
-bot.command("backup", (ctx) => {
-    const backupData = {
-        capital: loadCapital(),
-        positions: loadPositions(),
-        alertSettings: loadAlertSettings(),
-        settings: loadSettings()
-    };
-    const backupString = `OKX_BOT_BACKUP_V1:${Buffer.from(JSON.stringify(backupData)).toString('base64')}`;
-    ctx.reply(`📋 *نسخة احتياطية*\n\nقم بنسخ هذه الرسالة والاحتفاظ بها. لاستعادة الإعدادات، قم بعمل "إعادة توجيه" (Forward) لهذه الرسالة إلى البوت.\n\n\`\`\`\n${backupString}\n\`\`\``, { parse_mode: "Markdown" });
-});
 
-bot.on("message:forward_origin", async (ctx) => {
+bot.on("message:forward_date", async (ctx) => {
     if (ctx.message.text && ctx.message.text.startsWith("OKX_BOT_BACKUP_V1:")) {
         try {
             const encodedData = ctx.message.text.split(':')[1];
             const decodedString = Buffer.from(encodedData, 'base64').toString('utf8');
             const backupData = JSON.parse(decodedString);
 
-            if (backupData.capital !== undefined) saveCapital(backupData.capital);
+            if (backupData.capital) saveCapital(backupData.capital);
             if (backupData.positions) savePositions(backupData.positions);
             if (backupData.alertSettings) saveAlertSettings(backupData.alertSettings);
             if (backupData.settings) saveSettings(backupData.settings);
@@ -225,7 +216,11 @@ bot.on("callback_query:data", async (ctx) => {
                       `⬇️ *أدنى قيمة:* \`$${stats.minValue.toFixed(2)}\`\n` +
                       `📊 *متوسط القيمة:* \`$${stats.avgValue.toFixed(2)}\``;
         
-        await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" });
+        if (chartUrl) {
+            await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" });
+        } else {
+            await ctx.reply(caption, { parse_mode: "Markdown" });
+        }
         await ctx.deleteMessage();
         return;
     }
@@ -241,8 +236,12 @@ bot.on("callback_query:data", async (ctx) => {
         case "view_movement_alerts": const alertSettings = loadAlertSettings(); let msg_alerts = `🚨 *إعدادات تنبيهات الحركة:*\n\n` + `*النسبة العامة:* \`${alertSettings.global}%\`\n` + `--------------------\n*النسب المخصصة:*\n`; if (Object.keys(alertSettings.overrides).length === 0) { msg_alerts += "لا توجد." } else { for (const coin in alertSettings.overrides) { msg_alerts += `- *${coin}:* \`${alertSettings.overrides[coin]}%\`\n`; } } await ctx.reply(msg_alerts, { parse_mode: "Markdown" }); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "set_capital": waitingState = 'set_capital'; await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); break;
+        case "backup_restore":
+            const backupData = { capital: loadCapital(), positions: loadPositions(), alertSettings: loadAlertSettings(), settings: loadSettings() };
+            const backupString = `OKX_BOT_BACKUP_V1:${Buffer.from(JSON.stringify(backupData)).toString('base64')}`;
+            await ctx.reply(`📋 *نسخة احتياطية*\n\nقم بنسخ هذه الرسالة والاحتفاظ بها. لاستعادة الإعدادات، قم بعمل "إعادة توجيه" (Forward) لهذه الرسالة إلى البوت.\n\n\`\`\`\n${backupString}\n\`\`\``, { parse_mode: "Markdown" });
+            break;
         case "delete_alert": waitingState = 'delete_alert'; await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); break;
-        case "backup_restore": await ctx.reply("📋 *النسخ الاحتياطي والاستعادة*\n\n- لإنشاء نسخة احتياطية من إعداداتك، أرسل الأمر: `/backup`\n- لاستعادة نسخة سابقة، قم بعمل 'إعادة توجيه' (Forward) لرسالة الباك أب إلى البوت.", { parse_mode: "Markdown"}); break;
         case "toggle_summary":
         case "toggle_autopost":
         case "toggle_debug":
@@ -257,6 +256,7 @@ bot.on("callback_query:data", async (ctx) => {
                     .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
                     .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
                     .text("💾 نسخ احتياطي واستعادة", "backup_restore").row()
+                    .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
                     .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
                     .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
                     .text("🔥 حذف كل البيانات 🔥", "delete_all_data");
