@@ -124,96 +124,123 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
+// ==== نسخة الاختبار النهائية مع CSS مبسط جدًا ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
         if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
+            console.error("HCTI_USER_ID or HCTI_API_KEY is missing from .env file.");
             return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
         }
 
-        let htmlTemplate;
-        try {
-            htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
-        } catch (fileError) {
-            return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
-        }
-        
-        let pnlAmount_str = "0.00";
-        let pnlPercent_str = "0.00";
-        let pnlSign = "";
-        let pnlClass = "";
+        // CSS مبسط جدًا بدون خطوط خارجية أو ظلال
+        const simplifiedCss = `
+            body { 
+                font-family: sans-serif; /* استخدام خط أساسي */
+                background-color: #2a2d35; 
+                color: #e5e7eb; 
+                padding: 20px; 
+                direction: rtl; 
+            }
+            .card { 
+                background-color: #373a43;
+                border: 2px solid #555;
+                padding: 25px; 
+                width: 600px;
+            }
+            .header { 
+                text-align: center;
+                border-bottom: 1px solid #555; 
+                padding-bottom: 15px; 
+                margin-bottom: 20px; 
+            }
+            .header h2 { 
+                margin: 0; 
+                color: #fff; 
+            }
+            .stats { 
+                display: flex; 
+                justify-content: space-around; 
+                text-align: center; 
+                margin-bottom: 25px; 
+            }
+            .pnl.positive { color: #22c55e; }
+            .pnl.negative { color: #ef4444; }
+            .assets-title { 
+                font-size: 18px; 
+                font-weight: bold; 
+                color: #fff; 
+                margin-bottom: 15px; 
+                text-align: center;
+            }
+            .asset { 
+                display: flex; 
+                justify-content: space-between;
+                padding: 10px 0; 
+                border-bottom: 1px solid #555; 
+            }
+            .asset:last-child { border-bottom: none; }
+            .asset-info .name { font-size: 18px; font-weight: bold; color: #fff; }
+            .asset-values .value { font-size: 16px; font-weight: bold; }
+        `;
 
-        if (capital > 0) {
-            const pnl = total - capital;
-            const pnlPercent = (pnl / capital) * 100;
-            pnlAmount_str = pnl.toFixed(2);
-            pnlPercent_str = pnlPercent.toFixed(2);
-            pnlSign = pnl >= 0 ? '+' : '';
-            pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-        } else {
-            pnlAmount_str = "N/A";
-            pnlPercent_str = "N/A";
-        }
-
+        // بناء الـ HTML بنفس الطريقة
+        const pnl = capital > 0 ? total - capital : 0;
+        const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
         let assetsRows = '';
         const positions = loadPositions();
-
         assets.forEach(asset => {
             const percent = total > 0 ? (asset.value / total) * 100 : 0;
-            let pnlText = `---`;
-            let pnlClassAsset = '';
-            let avgBuyPriceText = positions[asset.asset] ? `$${positions[asset.asset].avgBuyPrice.toFixed(4)}` : 'N/A';
-
-            if (positions[asset.asset] && positions[asset.asset].avgBuyPrice > 0 && asset.asset !== 'USDT') {
-                const avgBuyPrice = positions[asset.asset].avgBuyPrice;
-                const assetPnl = asset.value - (avgBuyPrice * asset.amount);
-                const assetPnlSign = assetPnl >= 0 ? '+' : '';
-                pnlClassAsset = assetPnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-                pnlText = `${assetPnlSign}$${assetPnl.toFixed(2)}`;
-            }
-            
             assetsRows += `
                 <div class="asset">
-                    <div class="asset-left">
+                    <div class="asset-info">
                         <div class="name">${asset.asset}</div>
-                        <div class="details">متوسط الشراء: ${avgBuyPriceText}</div>
                     </div>
-                    <div class="asset-right">
-                        <div class="value">$${asset.value.toFixed(2)}</div>
-                        <div class="pnl ${pnlClassAsset}">${pnlText} (${percent.toFixed(2)}%)</div>
+                    <div class="asset-values">
+                        <div class="value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
                     </div>
                 </div>
             `;
         });
         
-        const finalHtml = htmlTemplate
-            .replace('{{TOTAL_VALUE}}', total.toFixed(2))
-            .replace('{{CAPITAL}}', capital.toFixed(2))
-            .replace('{{PNL_CLASS}}', pnlClass)
-            .replace('{{PNL_SIGN}}', pnlSign)
-            .replace('{{PNL_AMOUNT}}', pnlAmount_str)
-            .replace('{{PNL_PERCENT}}', pnlPercent_str)
-            .replace('{{ASSETS_ROWS}}', assetsRows);
+        const finalHtml = `
+            <html>
+                <head><meta charset="UTF-8"><style>${simplifiedCss}</style></head>
+                <body>
+                    <div class="card">
+                        <div class="header">
+                            <h2>ملخص المحفظة</h2>
+                        </div>
+                        <div class="stats">
+                            <div><h3>القيمة:</h3> <p>$${total.toFixed(2)}</p></div>
+                            <div><h3>الربح/الخسارة:</h3> <p class="pnl ${pnl >= 0 ? 'positive' : 'negative'}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</p></div>
+                        </div>
+                        <div class="assets-title">الأصول</div>
+                        ${assetsRows}
+                    </div>
+                </body>
+            </html>
+        `;
 
+        // استدعاء الخدمة
         const response = await fetch('https://hcti.io/v1/image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64') },
-            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" })
+            body: JSON.stringify({ html: finalHtml, google_fonts: "Cairo" }) // محاولة طلب الخط بطريقة أخرى
         });
-
         const data = await response.json();
-
         if (data.url) {
             return { url: data.url };
         } else {
             console.error("HCTI API Error:", data);
-            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب." };
+            return { error: "فشل إنشاء الصورة حتى مع التصميم المبسط." };
         }
 
     } catch (error) {
         console.error("Exception in generatePortfolioImageUrl:", error);
-        return { error: "حدث خطأ برمجي غير متوقع أثناء إنشاء الصورة." };
+        return { error: "حدث خطأ غير متوقع." };
     }
 }
+
 
 
 function createChartUrl(history, periodLabel) {
