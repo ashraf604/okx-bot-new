@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v34 (Final Build - Restore Fix)
+// OKX Advanced Analytics Bot - v35 (Final Stable Build)
 // =================================================================
-// This version includes the definitive fix for the backup restore functionality.
+// This is the definitive final version with all features and fixes.
 // =================================================================
 
 const express = require("express");
@@ -119,7 +119,7 @@ async function sendSettingsMenu(ctx) {
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital").text("💼 إدارة المراكز", "manage_positions").row()
         .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-        .text("💾 نسخ احتياطي", "backup_restore").row()
+        .text("💾 نسخ احتياطي", "backup_command").row() // Changed to command
         .text("🗑️ حذف تنبيه", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
         .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
@@ -136,23 +136,42 @@ bot.command("start", async (ctx) => { await ctx.reply("🤖 *بوت OKX التح
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
 bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "`/pnl <شراء> <بيع> <كمية>`\n\n" + "*مثال:*\n`/pnl 100 120 0.5`", { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن القيم أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const responseMessage = `*📊 نتيجة الحساب:*\n\n- إجمالي الشراء: \`$${totalInvestment.toLocaleString()}\`\n- إجمالي البيع: \`$${totalSaleValue.toLocaleString()}\`\n\n- الربح/الخسارة: \`$${profitOrLoss.toLocaleString()}\`\n- النسبة: \`${pnlPercentage.toFixed(2)}%\`\n\n*النتيجة: ${resultStatus}*`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
 bot.command("avg", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 2 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "استخدم: `/avg <SYMBOL> <PRICE>`\n\n" + "*مثال:*\n`/avg OP 1.50`", { parse_mode: "Markdown" }); } const [symbol, priceStr] = args; const price = parseFloat(priceStr); if (isNaN(price) || price <= 0) { return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا."); } const positions = loadPositions(); positions[symbol.toUpperCase()] = { avgBuyPrice: price }; savePositions(positions); await ctx.reply(`✅ تم تحديث متوسط شراء *${symbol.toUpperCase()}* إلى \`$${price.toFixed(4)}\`.`, { parse_mode: "Markdown" }); });
+bot.command("backup", (ctx) => {
+    const backupData = {
+        capital: loadCapital(),
+        positions: loadPositions(),
+        alertSettings: loadAlertSettings(),
+        settings: loadSettings()
+    };
+    const backupString = `OKX_BOT_BACKUP_V1:${Buffer.from(JSON.stringify(backupData)).toString('base64')}`;
+    ctx.reply(`📋 *نسخة احتياطية*\n\nاحتفظ بهذه الرسالة. لاستعادة الإعدادات، قم بعمل "إعادة توجيه" (Forward) لهذه الرسالة إلى البوت.\n\n\`\`\`\n${backupString}\n\`\`\``, { parse_mode: "Markdown" });
+});
 
-// --- معالج النسخ الاحتياطي (الاستعادة) ---
-bot.on(":forward", async (ctx) => {
+bot.on("message:forward_origin", async (ctx) => {
     if (ctx.message.text && ctx.message.text.startsWith("OKX_BOT_BACKUP_V1:")) {
         try {
+            await ctx.reply("⏳ جاري استعادة النسخة الاحتياطية...");
             const encodedData = ctx.message.text.split(':')[1].trim();
             const decodedString = Buffer.from(encodedData, 'base64').toString('utf8');
             const backupData = JSON.parse(decodedString);
 
             if (backupData.capital !== undefined) saveCapital(backupData.capital);
             if (backupData.positions) savePositions(backupData.positions);
-            if (backupData.alertSettings) saveAlertSettings(backupData.alertSettings);
-            if (backupData.settings) saveSettings(backupData.settings);
+            
+            if (backupData.alertSettings) {
+                const currentAlertSettings = loadAlertSettings();
+                const finalAlertSettings = { ...currentAlertSettings, ...backupData.alertSettings };
+                saveAlertSettings(finalAlertSettings);
+            }
+            if (backupData.settings) {
+                const currentSettings = loadSettings();
+                const finalSettings = { ...currentSettings, ...backupData.settings };
+                saveSettings(finalSettings);
+            }
 
             await ctx.reply("✅ *تم استعادة الإعدادات بنجاح!*");
         } catch (e) {
-            await ctx.reply("❌ *فشل استعادة النسخة الاحتياطية.* قد تكون الرسالة تالفة أو غير صحيحة.");
+            await ctx.reply("❌ *فشل استعادة النسخة الاحتياطية.*");
             console.error("Restore failed:", e);
         }
     }
@@ -237,7 +256,7 @@ bot.on("callback_query:data", async (ctx) => {
         case "view_movement_alerts": const alertSettings = loadAlertSettings(); let msg_alerts = `🚨 *إعدادات تنبيهات الحركة:*\n\n` + `*النسبة العامة:* \`${alertSettings.global}%\`\n` + `--------------------\n*النسب المخصصة:*\n`; if (Object.keys(alertSettings.overrides).length === 0) { msg_alerts += "لا توجد." } else { for (const coin in alertSettings.overrides) { msg_alerts += `- *${coin}:* \`${alertSettings.overrides[coin]}%\`\n`; } } await ctx.reply(msg_alerts, { parse_mode: "Markdown" }); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "set_capital": waitingState = 'set_capital'; await ctx.reply("💰 أرسل المبلغ الجديد لرأس المال."); break;
-        case "backup_restore": const backupData = { capital: loadCapital(), positions: loadPositions(), alertSettings: loadAlertSettings(), settings: loadSettings() }; const backupString = `OKX_BOT_BACKUP_V1:${Buffer.from(JSON.stringify(backupData)).toString('base64')}`; await ctx.reply(`📋 *نسخة احتياطية*\n\nاحتفظ بهذه الرسالة. لاستعادة الإعدادات، قم بعمل "إعادة توجيه" (Forward) لهذه الرسالة إلى البوت.\n\n\`\`\`\n${backupString}\n\`\`\``, { parse_mode: "Markdown" }); break;
+        case "backup_restore": await ctx.reply("لإنشاء نسخة احتياطية، أرسل الأمر: `/backup`\n\nلاستعادة نسخة، قم بعمل 'إعادة توجيه' (Forward) لرسالة النسخة الاحتياطية إلى البوت."); break;
         case "delete_alert": waitingState = 'delete_alert'; await ctx.reply("🗑️ أرسل ID التنبيه الذي تريد حذفه."); break;
         case "toggle_summary":
         case "toggle_autopost":
