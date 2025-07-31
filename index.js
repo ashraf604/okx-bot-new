@@ -124,64 +124,20 @@ function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
+// ==== دالة مؤقتة للاختبار - استبدل الدالة الأصلية بهذه ====
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
-        if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
-            console.error("HCTI_USER_ID or HCTI_API_KEY is missing from .env file.");
-            return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
-        }
+        console.log("Starting image generation test...");
 
-        let htmlTemplate;
-        try {
-            htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
-        } catch (fileError) {
-            console.error("Could not read portfolio-template.html:", fileError);
-            return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
-        }
-        
-        const pnl = capital > 0 ? total - capital : 0;
-        const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-        let assetsRows = '';
-        const positions = loadPositions();
-
-        assets.forEach(asset => {
-            const percent = total > 0 ? (asset.value / total) * 100 : 0;
-            let pnlText = '---';
-            let avgBuyText = 'N/A';
-            if (positions[asset.asset] && positions[asset.asset].avgBuyPrice > 0) {
-                avgBuyText = `$${positions[asset.asset].avgBuyPrice.toFixed(4)}`;
-                if(asset.asset !== 'USDT') {
-                    const avgBuyPrice = positions[asset.asset].avgBuyPrice;
-                    const assetPnl = asset.value - (avgBuyPrice * asset.amount);
-                    const assetPnlClass = assetPnl >= 0 ? 'positive' : 'negative';
-                    const assetPnlSign = assetPnl >= 0 ? '+' : '';
-                    pnlText = `<span class="pnl-asset ${assetPnlClass}">${assetPnlSign}$${assetPnl.toFixed(2)}</span>`;
-                }
-            }
-            
-            assetsRows += `
-                <div class="asset">
-                    <div class="asset-info">
-                        <div class="name">${asset.asset}</div>
-                        <div class="details">متوسط الشراء: ${avgBuyText}</div>
-                    </div>
-                    <div class="asset-values">
-                        <div class="value">$${asset.value.toFixed(2)} (${percent.toFixed(2)}%)</div>
-                        <div class="details">${pnlText}</div>
-                    </div>
-                </div>
-            `;
-        });
-        
-        htmlTemplate = htmlTemplate
-            .replace('{{TIMESTAMP}}', new Date().toLocaleString('ar-EG'))
-            .replace('{{TOTAL_VALUE}}', total.toFixed(2))
-            .replace('{{CAPITAL}}', capital.toFixed(2))
-            .replace('{{PNL_CLASS}}', pnl >= 0 ? 'positive' : 'negative')
-            .replace('{{PNL_SIGN}}', pnl >= 0 ? '+' : '')
-            .replace('{{PNL_AMOUNT}}', pnl.toFixed(2))
-            .replace('{{PNL_PERCENT}}', pnlPercent.toFixed(2))
-            .replace('{{ASSETS_ROWS}}', assetsRows);
+        // هذا كود HTML بسيط جدًا للاختبار فقط
+        // له خلفية بيضاء وخط أسود لضمان ظهوره
+        const testHtml = `
+        <div style="width: 600px; padding: 50px; background-color: #ffffff; color: #000000; font-size: 24px; border: 5px solid blue;">
+            <h1>مرحبا، هذا اختبار!</h1>
+            <p>إذا ظهرت هذه الرسالة، فالاتصال بخدمة الصور سليم.</p>
+            <p>قيمة المحفظة: <b>$${total.toFixed(2)}</b></p>
+        </div>
+        `;
 
         const response = await fetch('https://hcti.io/v1/image', {
             method: 'POST',
@@ -189,24 +145,25 @@ async function generatePortfolioImageUrl(assets, total, capital) {
                 'Content-Type': 'application/json',
                 'Authorization': 'Basic ' + Buffer.from(`${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`).toString('base64')
             },
-            body: JSON.stringify({ html: htmlTemplate })
+            body: JSON.stringify({ html: testHtml })
         });
 
         const data = await response.json();
 
         if (data.url) {
+            console.log("Test image generated successfully:", data.url);
             return { url: data.url };
         } else {
-            console.error("HCTI API Error:", data);
-            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم (logs) للمزيد من التفاصيل." };
+            console.error("HCTI API Error during test:", data);
+            return { error: "فشلت خدمة الصور حتى مع التصميم البسيط. تحقق من سجلات الخادم." };
         }
 
     } catch (error) {
-        console.error("Exception in generatePortfolioImageUrl:", error);
+        console.error("Exception in test generatePortfolioImageUrl:", error);
         return { error: "حدث خطأ غير متوقع أثناء الاتصال بخدمة الصور." };
     }
 }
-
+// ==== نهاية الدالة المؤقتة للاختبار ====
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
