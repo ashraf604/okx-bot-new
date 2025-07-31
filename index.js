@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v32 (Image View Option)
+// OKX Advanced Analytics Bot - v32.1 (Error Diagnostics)
 // =================================================================
-// هذا الإصدار يضيف خيار عرض المحفظة كصورة احترافية.
+// هذا الإصدار يحسن من معالجة الأخطاء في إنشاء الصور.
 // =================================================================
 
 const express = require("express");
@@ -126,7 +126,19 @@ function formatPortfolioMsg(assets, total, capital) {
 
 async function generatePortfolioImageUrl(assets, total, capital) {
     try {
-        let htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
+        if (!process.env.HCTI_USER_ID || !process.env.HCTI_API_KEY) {
+            console.error("HCTI_USER_ID or HCTI_API_KEY is missing from .env file.");
+            return { error: "إعدادات خدمة الصور غير مكتملة. يرجى مراجعة ملف .env" };
+        }
+
+        let htmlTemplate;
+        try {
+            htmlTemplate = fs.readFileSync('./portfolio-template.html', 'utf-8');
+        } catch (fileError) {
+            console.error("Could not read portfolio-template.html:", fileError);
+            return { error: "ملف تصميم الصورة (portfolio-template.html) غير موجود." };
+        }
+        
         const pnl = capital > 0 ? total - capital : 0;
         const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
         let assetsRows = '';
@@ -179,11 +191,19 @@ async function generatePortfolioImageUrl(assets, total, capital) {
             },
             body: JSON.stringify({ html: htmlTemplate })
         });
+
         const data = await response.json();
-        return data.url;
+
+        if (data.url) {
+            return { url: data.url };
+        } else {
+            console.error("HCTI API Error:", data);
+            return { error: "فشلت خدمة إنشاء الصور في معالجة الطلب. تحقق من سجلات الخادم (logs) للمزيد من التفاصيل." };
+        }
+
     } catch (error) {
-        console.error("Error generating image:", error);
-        return null;
+        console.error("Exception in generatePortfolioImageUrl:", error);
+        return { error: "حدث خطأ غير متوقع أثناء الاتصال بخدمة الصور." };
     }
 }
 
@@ -420,16 +440,17 @@ bot.on("callback_query:data", async (ctx) => {
                 return;
             }
             const capital = loadCapital();
-            const imageUrl = await generatePortfolioImageUrl(assets, total, capital);
-            if (imageUrl) {
-                await ctx.replyWithPhoto(imageUrl);
-                await ctx.deleteMessage(); // Delete the original text message
+            const result = await generatePortfolioImageUrl(assets, total, capital);
+
+            if (result.url) {
+                await ctx.replyWithPhoto(result.url);
+                await ctx.deleteMessage();
             } else {
-                await ctx.editMessageText("❌ حدث خطأ أثناء إنشاء الصورة.");
+                await ctx.editMessageText(`❌ حدث خطأ أثناء إنشاء الصورة.\n\n*السبب:* ${result.error}`);
             }
         } catch (e) {
             console.error("Error handling image generation callback:", e);
-            await ctx.reply("❌ حدث خطأ غير متوقع.");
+            await ctx.reply("❌ حدث خطأ غير متوقع في معالج الصور.");
         }
         return;
     }
