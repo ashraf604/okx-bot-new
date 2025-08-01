@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v33 (Daily PnL Feature)
+// OKX Advanced Analytics Bot - v34 (Professional Summary)
 // =================================================================
-// هذا الإصدار يضيف الربح/الخسارة اليومي إلى الملخص الرئيسي.
+// هذا الإصدار يضيف مؤشرات احترافية لملخص المحفظة.
 // =================================================================
 
 const express = require("express");
@@ -78,12 +78,10 @@ function getHeaders(method, path, body = "") { const timestamp = new Date().toIS
 
 // === دوال العرض والمساعدة ===
 function formatPortfolioMsg(assets, total, capital) {
-    // --- حساب الربح/الخسارة اليومي ---
+    // --- Daily PnL Calculation ---
     const history = loadHistory();
-    let dailyPnlText = "   📈 *الربح/الخسارة (يومي):* `لا توجد بيانات كافية`\n"; 
-    
-    // نحتاج على الأقل سجلين للمقارنة (اليوم والأمس)
-    if (history.length > 1) {
+    let dailyPnlText = "   📈 *الربح/الخسارة (يومي):* `لا توجد بيانات كافية`\n";
+    if (history.length > 1 && history[history.length - 2] && typeof history[history.length - 2].total === 'number') {
         const previousDayTotal = history[history.length - 2].total;
         const dailyPnl = total - previousDayTotal;
         const dailyPnlPercent = previousDayTotal > 0 ? (dailyPnl / previousDayTotal) * 100 : 0;
@@ -92,25 +90,33 @@ function formatPortfolioMsg(assets, total, capital) {
         dailyPnlText = `   📈 *الربح/الخسارة (يومي):* ${dailyPnlEmoji} \`${dailyPnlSign}${dailyPnl.toFixed(2)}\` (\`${dailyPnlSign}${dailyPnlPercent.toFixed(2)}%\`)\n`;
     }
 
-    // --- حساب الربح/الخسارة الإجمالي ---
+    // --- Total PnL Calculation ---
     const positions = loadPositions();
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
     let pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
     let pnlSign = pnl >= 0 ? '+' : '';
 
-    // --- بناء الرسالة ---
+    // --- Liquidity Ratio Calculation ---
+    const usdtAsset = assets.find(a => a.asset === 'USDT');
+    const usdtValue = usdtAsset ? usdtAsset.value : 0;
+    const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0;
+    const investedPercent = 100 - cashPercent;
+    const liquidityText = `   - *السيولة:* 💵 الكاش ${cashPercent.toFixed(1)}% / 📈 المستثمر ${investedPercent.toFixed(1)}%`;
+
+    // --- Message Construction ---
     let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
     msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
     msg += `━━━━━━━━━━━━━━━━━━━\n`;
     msg += `📊 *الأداء العام:*\n`;
     msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
     msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
-    msg += `   📉 *الربح/الخسارة (إجمالي):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
-    msg += dailyPnlText; // إضافة الربح اليومي هنا
+    msg += `   📉 *ربح إجمالي غير محقق:* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += dailyPnlText;
+    msg += liquidityText + `\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `💎 *الأصــــــــول:*\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
         msg += "\n";
@@ -118,9 +124,15 @@ function formatPortfolioMsg(assets, total, capital) {
             msg += `╭─ *${a.asset}*\n`;
             msg += `╰─ 💰 *الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
         } else {
+            const change24hPercent = a.change24h * 100;
+            const changeEmoji = change24hPercent >= 0 ? '🟢' : '🔴';
+            const changeSign = change24hPercent >= 0 ? '+' : '';
+
             msg += `╭─ *${a.asset}*\n`;
             msg += `├─ 💰 *القيمة:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)\n`;
             msg += `├─ 📈 *السعر الحالي:* \`$${a.price.toFixed(4)}\`\n`;
+            msg += `├─ ⏱️ *تغير (24س):* ${changeEmoji} \`${changeSign}${change24hPercent.toFixed(2)}%\`\n`;
+            
             if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
                 const avgBuyPrice = positions[a.asset].avgBuyPrice;
                 const totalCost = avgBuyPrice * a.amount;
@@ -129,7 +141,7 @@ function formatPortfolioMsg(assets, total, capital) {
                 const assetPnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
                 const assetPnlSign = assetPnl >= 0 ? '+' : '';
                 msg += `├─ 🛒 *متوسط الشراء:* \`$${avgBuyPrice.toFixed(4)}\`\n`;
-                msg += `╰─ 📉 *الربح/الخسارة:* ${assetPnlEmoji} \`${assetPnlSign}${assetPnl.toFixed(2)}\` (\`${assetPnlSign}${assetPnlPercent.toFixed(2)}%\`)`;
+                msg += `╰─ 📉 *ربح غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${assetPnl.toFixed(2)}\` (\`${assetPnlSign}${assetPnlPercent.toFixed(2)}%\`)`;
             } else {
                 msg += `╰─ 🛒 *متوسط الشراء:* لم يتم تسجيله`;
             }
@@ -166,8 +178,64 @@ function calculatePerformanceStats(history) {
 }
 
 // === دوال منطق البوت والمهام المجدولة ===
-async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => prices[t.instId] = parseFloat(t.last)); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
-async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const price = prices[instId] || (asset.ccy === "USDT" ? 1 : 0); const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price, value, amount }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getMarketPrices() {
+    try {
+        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+        const tickersJson = await tickersRes.json();
+        if (tickersJson.code !== '0') {
+            console.error("Failed to fetch market prices:", tickersJson.msg);
+            return null;
+        }
+        const prices = {};
+        tickersJson.data.forEach(t => {
+            prices[t.instId] = {
+                price: parseFloat(t.last),
+                change24h: parseFloat(t.chg24h) || 0
+            };
+        });
+        return prices;
+    } catch (error) {
+        console.error("Exception in getMarketPrices:", error);
+        return null;
+    }
+}
+
+async function getPortfolio(prices) {
+    try {
+        const path = "/api/v5/account/balance";
+        const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
+        const json = await res.json();
+        if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` };
+        
+        let assets = [], total = 0;
+        json.data[0]?.details?.forEach(asset => {
+            const amount = parseFloat(asset.eq);
+            if (amount > 0) {
+                const instId = `${asset.ccy}-USDT`;
+                const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 };
+                const price = priceData.price;
+                const value = amount * price;
+                
+                if (value >= 1) {
+                    assets.push({ 
+                        asset: asset.ccy, 
+                        price: price, 
+                        value: value, 
+                        amount: amount,
+                        change24h: priceData.change24h
+                    });
+                }
+                total += value;
+            }
+        });
+        const filteredAssets = assets.filter(a => a.value >= 1);
+        filteredAssets.sort((a, b) => b.value - a.value);
+        return { assets: filteredAssets, total };
+    } catch (e) {
+        console.error(e);
+        return { error: "خطأ في الاتصال بالمنصة." };
+    }
+}
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
 async function monitorBalanceChanges() {
     await sendDebugMessage("بدء دورة التحقق من الصفقات...");
@@ -191,13 +259,13 @@ async function monitorBalanceChanges() {
 
         let previousTotalPortfolioValue = 0;
         for (const prevAsset in previousBalanceState) {
-            const prevAssetPrice = prices[`${prevAsset}-USDT`] || (prevAsset === "USDT" ? 1 : 0);
+            const prevAssetPrice = (prices[`${prevAsset}-USDT`] || {}).price || (prevAsset === "USDT" ? 1 : 0);
             previousTotalPortfolioValue += (previousBalanceState[prevAsset] * prevAssetPrice);
         }
 
         const previousUSDTBalance = previousBalanceState['USDT'] || 0;
         const { total: newTotalPortfolioValue } = await getPortfolio(prices);
-        const price = prices[`${asset}-USDT`];
+        const price = (prices[`${asset}-USDT`] || {}).price;
 
         if (newTotalPortfolioValue === undefined || !price) {
             await sendDebugMessage("فشل جلب بيانات المحفظة/السعر.");
@@ -282,10 +350,10 @@ async function monitorBalanceChanges() {
     saveBalanceState(previousBalanceState);
 }
 async function getInstrumentDetails(instId) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const json = await res.json(); if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` }; const data = json.data[0]; return { price: parseFloat(data.last), high24h: parseFloat(data.high24h), low24h: parseFloat(data.low24h), vol24h: parseFloat(data.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
-async function checkPriceAlerts() { const alerts = loadAlerts(); if (alerts.length === 0) return; try { const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = prices[alert.instId]; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
+async function checkPriceAlerts() { const alerts = loadAlerts(); if (alerts.length === 0) return; try { const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = (prices[alert.instId] || {}).price; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
 async function runDailyJobs() { const settings = loadSettings(); if (!settings.dailySummary) return; const prices = await getMarketPrices(); if (!prices) return; const { total, error } = await getPortfolio(prices); if (error) return console.error("Daily Summary Error:", error); const history = loadHistory(); const date = new Date().toISOString().slice(0, 10); if (history.length > 0 && history[history.length - 1].date === date) { history[history.length - 1].total = total; } else { history.push({ date: date, total: total }); } if (history.length > 35) history.shift(); saveHistory(history); console.log(`[✅ Daily Summary]: ${date} - $${total.toFixed(2)}`); }
 async function runHourlyJobs() { const prices = await getMarketPrices(); if (!prices) return; const { total, error } = await getPortfolio(prices); if (error) return; const hourlyHistory = loadHourlyHistory(); const now = new Date(); const label = `${now.getHours()}:00`; hourlyHistory.push({ label: label, total: total }); if (hourlyHistory.length > 24) hourlyHistory.shift(); saveHourlyHistory(hourlyHistory); console.log(`[✅ Hourly Summary]: ${label} - $${total.toFixed(2)}`); }
-async function checkPriceMovements() { await sendDebugMessage("بدء دورة التحقق من حركة الأسعار..."); const alertSettings = loadAlertSettings(); const priceTracker = loadPriceTracker(); const prices = await getMarketPrices(); if (!prices) { await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة."); return; } const { assets, total: currentTotalValue, error } = await getPortfolio(prices); if (error || currentTotalValue === undefined) { await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة."); return; } if (priceTracker.totalPortfolioValue === 0) { priceTracker.totalPortfolioValue = currentTotalValue; assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; }); savePriceTracker(priceTracker); await sendDebugMessage("تم تسجيل قيم تتبع الأسعار الأولية."); return; } let trackerUpdated = false; const lastTotalValue = priceTracker.totalPortfolioValue; if (lastTotalValue > 0) { const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100; if (Math.abs(changePercent) >= alertSettings.global) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.totalPortfolioValue = currentTotalValue; trackerUpdated = true; } } for (const asset of assets) { if (asset.asset === 'USDT' || !asset.price) continue; const lastPrice = priceTracker.assets[asset.asset]; if (lastPrice) { const changePercent = ((asset.price - lastPrice) / lastPrice) * 100; const threshold = alertSettings.overrides[asset.asset] || alertSettings.global; if (Math.abs(changePercent) >= threshold) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${asset.price.toFixed(4)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } else { priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } if (trackerUpdated) { savePriceTracker(priceTracker); await sendDebugMessage("تم تحديث متتبع الأسعار بعد إرسال تنبيه."); } else { await sendDebugMessage("لا توجد حركات أسعار تتجاوز الحد."); } }
+async function checkPriceMovements() { await sendDebugMessage("بدء دورة التحقق من حركة الأسعار..."); const alertSettings = loadAlertSettings(); const priceTracker = loadPriceTracker(); const prices = await getMarketPrices(); if (!prices) { await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة."); return; } const { assets, total: currentTotalValue, error } = await getPortfolio(prices); if (error || currentTotalValue === undefined) { await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة."); return; } if (priceTracker.totalPortfolioValue === 0) { priceTracker.totalPortfolioValue = currentTotalValue; assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; }); savePriceTracker(priceTracker); await sendDebugMessage("تم تسجيل قيم تتبع الأسعار الأولية."); return; } let trackerUpdated = false; const lastTotalValue = priceTracker.totalPortfolioValue; if (lastTotalValue > 0) { const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100; if (Math.abs(changePercent) >= alertSettings.global) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.totalPortfolioValue = currentTotalValue; trackerUpdated = true; } } for (const asset of assets) { if (asset.asset === 'USDT' || !asset.price) continue; const lastPrice = priceTracker.assets[asset.asset]; if (lastPrice) { const currentPrice = asset.price; const changePercent = ((currentPrice - lastPrice) / lastPrice) * 100; const threshold = alertSettings.overrides[asset.asset] || alertSettings.global; if (Math.abs(changePercent) >= threshold) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${currentPrice.toFixed(4)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.assets[asset.asset] = currentPrice; trackerUpdated = true; } } else { priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } if (trackerUpdated) { savePriceTracker(priceTracker); await sendDebugMessage("تم تحديث متتبع الأسعار بعد إرسال تنبيه."); } else { await sendDebugMessage("لا توجد حركات أسعار تتجاوز الحد."); } }
 
 // --- لوحات المفاتيح والقوائم ---
 const mainKeyboard = new Keyboard().text("📊 عرض المحفظة").text("📈 أداء المحفظة").row().text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row().text("🧮 حاسبة الربح والخسارة").row().text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
