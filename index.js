@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v31.1 (Reviewed & Corrected)
+// OKX Advanced Analytics Bot - v33 (Daily PnL Feature)
 // =================================================================
-// هذا الإصدار يطبق "النموذج التحليلي المنظم" ويصلح كافة الأخطاء.
+// هذا الإصدار يضيف الربح/الخسارة اليومي إلى الملخص الرئيسي.
 // =================================================================
 
 const express = require("express");
@@ -78,25 +78,42 @@ function getHeaders(method, path, body = "") { const timestamp = new Date().toIS
 
 // === دوال العرض والمساعدة ===
 function formatPortfolioMsg(assets, total, capital) {
+    // --- حساب الربح/الخسارة اليومي ---
+    const history = loadHistory();
+    let dailyPnlText = "   📈 *الربح/الخسارة (يومي):* `لا توجد بيانات كافية`\n"; 
+    
+    // نحتاج على الأقل سجلين للمقارنة (اليوم والأمس)
+    if (history.length > 1) {
+        const previousDayTotal = history[history.length - 2].total;
+        const dailyPnl = total - previousDayTotal;
+        const dailyPnlPercent = previousDayTotal > 0 ? (dailyPnl / previousDayTotal) * 100 : 0;
+        const dailyPnlEmoji = dailyPnl >= 0 ? '🟢' : '🔴';
+        const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
+        dailyPnlText = `   📈 *الربح/الخسارة (يومي):* ${dailyPnlEmoji} \`${dailyPnlSign}${dailyPnl.toFixed(2)}\` (\`${dailyPnlSign}${dailyPnlPercent.toFixed(2)}%\`)\n`;
+    }
+
+    // --- حساب الربح/الخسارة الإجمالي ---
     const positions = loadPositions();
     let pnl = capital > 0 ? total - capital : 0;
     let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
     let pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
     let pnlSign = pnl >= 0 ? '+' : '';
 
+    // --- بناء الرسالة ---
     let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
     msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
-    msg += `━━━━━━━━━━━━━━━━━\n`;
-    msg += `📊 *الأداء الإجمالي:*\n`;
+    msg += `━━━━━━━━━━━━\n`;
+    msg += `📊 *الأداء العام:*\n`;
     msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
     msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
-    msg += `   📈 *الربح/الخسارة (PnL):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `   📉 *الربح/الخسارة (إجمالي):* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += dailyPnlText; // إضافة الربح اليومي هنا
+    msg += `━━━━━━━━━━━━\n`;
     msg += `💎 *الأصــــــــول:*\n`;
 
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
-        msg += "\n"; // Add a newline before each asset for better spacing
+        msg += "\n";
         if (a.asset === "USDT") {
             msg += `╭─ *${a.asset}*\n`;
             msg += `╰─ 💰 *الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
@@ -118,11 +135,12 @@ function formatPortfolioMsg(assets, total, capital) {
             }
         }
         if (index < assets.length - 1) {
-            msg += `\n━━━━━━━━━━━━━━━━━━━`;
+            msg += `\n━━━━━━━━━━━━`;
         }
     });
     return msg;
 }
+
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
@@ -133,6 +151,7 @@ function createChartUrl(history, periodLabel) {
     };
     return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
 }
+
 function calculatePerformanceStats(history) {
     if (history.length < 2) return null;
     const values = history.map(h => h.total);
@@ -341,7 +360,7 @@ bot.command("avg", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
-
+    
     if (data.startsWith("publish_")) {
         const [, type, asset, ...params] = data.split('_');
         let finalRecommendation = "";
@@ -493,7 +512,19 @@ bot.on("message:text", async (ctx) => {
     }
 
     switch (text) {
-        case "📊 عرض المحفظة": await ctx.reply('⏳ لحظات...'); const prices = await getMarketPrices(); if (!prices) return await ctx.reply("❌ فشل جلب الأسعار."); const { assets, total, error } = await getPortfolio(prices); if (error) { await ctx.reply(`❌ ${error}`); } else { const capital = loadCapital(); const msg = formatPortfolioMsg(assets, total, capital); await ctx.reply(msg, { parse_mode: "Markdown" }); } break;
+        case "📊 عرض المحفظة":
+            await ctx.reply('⏳ لحظات...');
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ فشل جلب الأسعار.");
+            const { assets, total, error } = await getPortfolio(prices);
+            if (error) {
+                await ctx.reply(`❌ ${error}`);
+            } else {
+                const capital = loadCapital();
+                const msg = formatPortfolioMsg(assets, total, capital);
+                await ctx.reply(msg, { parse_mode: "Markdown" });
+            }
+            break;
         case "📈 أداء المحفظة":
             const keyboard = new InlineKeyboard()
                 .text("آخر 24 ساعة", "chart_24h")
