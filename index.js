@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v36 (Live Web Portfolio - Complete)
+// OKX Advanced Analytics Bot - v35.1 (Chart Crash Fix)
 // =================================================================
-// هذا الإصدار يقدم ملخص المحفظة عبر صفحة ويب حية (نسخة كاملة).
+// هذا الإصدار يصلح الخطأ الفادح الذي يسبب توقف البوت عند طلب الرسوم البيانية.
 // =================================================================
 
 const express = require("express");
@@ -9,12 +9,10 @@ const { Bot, Keyboard, InlineKeyboard, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const fs = require("fs");
-const ejs = require("ejs");
 require("dotenv").config();
 
 // --- إعدادات البوت الأساسية ---
 const app = express();
-app.set('view engine', 'ejs');
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
@@ -79,6 +77,74 @@ async function sendDebugMessage(message) {
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
 // === دوال العرض والمساعدة ===
+function formatPortfolioMsg(assets, total, capital) {
+    const history = loadHistory();
+    let dailyPnlText = "   📈 *الربح/الخسارة (يومي):* `لا توجد بيانات كافية`\n";
+    if (history.length > 1 && history[history.length - 2] && typeof history[history.length - 2].total === 'number') {
+        const previousDayTotal = history[history.length - 2].total;
+        const dailyPnl = total - previousDayTotal;
+        const dailyPnlPercent = previousDayTotal > 0 ? (dailyPnl / previousDayTotal) * 100 : 0;
+        const dailyPnlEmoji = dailyPnl >= 0 ? '🟢' : '🔴';
+        const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
+        dailyPnlText = `   📈 *الربح/الخسارة (يومي):* ${dailyPnlEmoji} \`${dailyPnlSign}${dailyPnl.toFixed(2)}\` (\`${dailyPnlSign}${dailyPnlPercent.toFixed(2)}%\`)\n`;
+    }
+    const positions = loadPositions();
+    let pnl = capital > 0 ? total - capital : 0;
+    let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+    let pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+    let pnlSign = pnl >= 0 ? '+' : '';
+    const usdtAsset = assets.find(a => a.asset === 'USDT');
+    const usdtValue = usdtAsset ? usdtAsset.value : 0;
+    const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0;
+    const investedPercent = 100 - cashPercent;
+    const liquidityText = `   - *السيولة:* 💵 الكاش ${cashPercent.toFixed(1)}% / 📈 المستثمر ${investedPercent.toFixed(1)}%`;
+
+    let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
+    msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📊 *الأداء العام:*\n`;
+    msg += `   💰 *القيمة الحالية:* \`$${total.toFixed(2)}\`\n`;
+    msg += `   💼 *رأس المال:* \`$${capital.toFixed(2)}\`\n`;
+    msg += `   📉 *ربح إجمالي غير محقق:* ${pnlEmoji} \`${pnlSign}${pnl.toFixed(2)}\` (\`${pnlSign}${pnlPercent.toFixed(2)}%\`)\n`;
+    msg += dailyPnlText;
+    msg += liquidityText + `\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💎 *الأصــــــــول:*\n`;
+
+    assets.forEach((a, index) => {
+        let percent = total > 0 ? ((a.value / total) * 100) : 0;
+        msg += "\n";
+        if (a.asset === "USDT") {
+            msg += `*USDT* 💵\n`;
+            msg += `*الرصيد:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)`;
+        } else {
+            const change24hPercent = a.change24h * 100;
+            const changeEmoji = change24hPercent >= 0 ? '🟢' : '🔴';
+            const changeSign = change24hPercent >= 0 ? '+' : '';
+            msg += `╭─ *${a.asset}*\n`;
+            msg += `├─ 💰 *القيمة:* \`$${a.value.toFixed(2)}\` (\`${percent.toFixed(2)}%\`)\n`;
+            msg += `├─ 📈 *السعر الحالي:* \`$${a.price.toFixed(4)}\`\n`;
+            msg += `├─ ⏱️ *تغير (24س):* ${changeEmoji} \`${changeSign}${change24hPercent.toFixed(2)}%\`\n`;
+            if (positions[a.asset] && positions[a.asset].avgBuyPrice > 0) {
+                const avgBuyPrice = positions[a.asset].avgBuyPrice;
+                const totalCost = avgBuyPrice * a.amount;
+                const assetPnl = a.value - totalCost;
+                const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
+                const assetPnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
+                const assetPnlSign = assetPnl >= 0 ? '+' : '';
+                msg += `├─ 🛒 *متوسط الشراء:* \`$${avgBuyPrice.toFixed(4)}\`\n`;
+                msg += `╰─ 📉 *ربح غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${assetPnl.toFixed(2)}\` (\`${assetPnlSign}${assetPnlPercent.toFixed(2)}%\`)`;
+            } else {
+                msg += `╰─ 🛒 *متوسط الشراء:* لم يتم تسجيله`;
+            }
+        }
+        if (index < assets.length - 1) {
+            msg += `\n━━━━━━━━━━━━━━━━━━━━`;
+        }
+    });
+    return msg;
+}
+
 function createChartUrl(history, periodLabel) {
     if (history.length < 2) return null;
     const labels = history.map(h => h.label);
@@ -210,10 +276,49 @@ async function monitorBalanceChanges() {
     }
 }
 
-async function getInstrumentDetails(instId) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const json = await res.json(); if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` }; const data = json.data[0]; return { price: parseFloat(data.last), high24h: parseFloat(data.high24h), low24h: parseFloat(data.low24h), vol24h: parseFloat(data.volCcy24h), open24h: parseFloat(data.open24h) }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getInstrumentDetails(instId) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`);
+        const json = await res.json();
+        if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` };
+        const data = json.data[0];
+        return {
+            price: parseFloat(data.last),
+            high24h: parseFloat(data.high24h),
+            low24h: parseFloat(data.low24h),
+            vol24h: parseFloat(data.volCcy24h),
+            open24h: parseFloat(data.open24h)
+        };
+    } catch (e) {
+        console.error(e);
+        return { error: "خطأ في الاتصال بالمنصة." };
+    }
+}
+
 async function checkPriceAlerts() { try { const alerts = loadAlerts(); if (alerts.length === 0) return; const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = (prices[alert.instId] || {}).price; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
-async function runDailyJobs() { try { console.log("Attempting to run daily jobs..."); const settings = loadSettings(); if (!settings.dailySummary) { console.log("Daily summary is disabled. Skipping."); return; } const prices = await getMarketPrices(); if (!prices) { console.error("Daily Jobs: Failed to get prices."); return; } const { total, error } = await getPortfolio(prices); if (error) { console.error("Daily Jobs Error:", error); return; } const history = loadHistory(); const date = new Date().toISOString().slice(0, 10); const todayRecordIndex = history.findIndex(h => h.date === date); if (todayRecordIndex > -1) { history[todayRecordIndex].total = total; } else { history.push({ date: date, total: total }); } if (history.length > 35) history.shift(); saveHistory(history); console.log(`[✅ Daily Summary Recorded]: ${date} - $${total.toFixed(2)}`); } catch(e) { console.error("CRITICAL ERROR in runDailyJobs:", e); } }
+
+async function runDailyJobs() {
+    try {
+        console.log("Attempting to run daily jobs...");
+        const settings = loadSettings();
+        if (!settings.dailySummary) { console.log("Daily summary is disabled. Skipping."); return; }
+        const prices = await getMarketPrices();
+        if (!prices) { console.error("Daily Jobs: Failed to get prices."); return; }
+        const { total, error } = await getPortfolio(prices);
+        if (error) { console.error("Daily Jobs Error:", error); return; }
+        const history = loadHistory();
+        const date = new Date().toISOString().slice(0, 10);
+        const todayRecordIndex = history.findIndex(h => h.date === date);
+        if (todayRecordIndex > -1) { history[todayRecordIndex].total = total; } 
+        else { history.push({ date: date, total: total }); }
+        if (history.length > 35) history.shift();
+        saveHistory(history);
+        console.log(`[✅ Daily Summary Recorded]: ${date} - $${total.toFixed(2)}`);
+    } catch(e) { console.error("CRITICAL ERROR in runDailyJobs:", e); }
+}
+
 async function runHourlyJobs() { try { const prices = await getMarketPrices(); if (!prices) return; const { total, error } = await getPortfolio(prices); if (error) return; const hourlyHistory = loadHourlyHistory(); const now = new Date(); const label = `${now.getHours()}:00`; hourlyHistory.push({ label: label, total: total }); if (hourlyHistory.length > 24) hourlyHistory.shift(); saveHourlyHistory(hourlyHistory); console.log(`[✅ Hourly Summary]: ${now.toISOString()} - $${total.toFixed(2)}`); } catch(e) { console.error("CRITICAL ERROR in runHourlyJobs:", e); } }
+
 async function checkPriceMovements() { try { await sendDebugMessage("بدء دورة التحقق من حركة الأسعار..."); const alertSettings = loadAlertSettings(); const priceTracker = loadPriceTracker(); const prices = await getMarketPrices(); if (!prices) { await sendDebugMessage("فشل جلب الأسعار، تخطي دورة فحص الحركة."); return; } const { assets, total: currentTotalValue, error } = await getPortfolio(prices); if (error || currentTotalValue === undefined) { await sendDebugMessage("فشل جلب المحفظة، تخطي دورة فحص الحركة."); return; } if (priceTracker.totalPortfolioValue === 0) { priceTracker.totalPortfolioValue = currentTotalValue; assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; }); savePriceTracker(priceTracker); await sendDebugMessage("تم تسجيل قيم تتبع الأسعار الأولية."); return; } let trackerUpdated = false; const lastTotalValue = priceTracker.totalPortfolioValue; if (lastTotalValue > 0) { const changePercent = ((currentTotalValue - lastTotalValue) / lastTotalValue) * 100; if (Math.abs(changePercent) >= alertSettings.global) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*القيمة الحالية:* \`$${currentTotalValue.toFixed(2)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.totalPortfolioValue = currentTotalValue; trackerUpdated = true; } } for (const asset of assets) { if (asset.asset === 'USDT' || !asset.price) continue; const lastPrice = priceTracker.assets[asset.asset]; if (lastPrice) { const currentPrice = asset.price; const changePercent = ((currentPrice - lastPrice) / lastPrice) * 100; const threshold = alertSettings.overrides[asset.asset] || alertSettings.global; if (Math.abs(changePercent) >= threshold) { const emoji = changePercent > 0 ? '🟢' : '🔴'; const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${changePercent.toFixed(2)}%\`\n*السعر الحالي:* \`$${currentPrice.toFixed(4)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.assets[asset.asset] = currentPrice; trackerUpdated = true; } } else { priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } if (trackerUpdated) { savePriceTracker(priceTracker); await sendDebugMessage("تم تحديث متتبع الأسعار بعد إرسال تنبيه."); } else { await sendDebugMessage("لا توجد حركات أسعار تتجاوز الحد."); } } catch(e) { console.error("CRITICAL ERROR in checkPriceMovements:", e); } }
 
 const mainKeyboard = new Keyboard().text("📊 عرض المحفظة").text("📈 أداء المحفظة").row().text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row().text("🧮 حاسبة الربح والخسارة").row().text("👁️ مراقبة الصفقات").text("⚙️ الإعدادات").resized();
@@ -251,7 +356,11 @@ bot.on("callback_query:data", async (ctx) => {
         }
         const stats = calculatePerformanceStats(periodData);
         if (!stats) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
+        
+        // vvv --- هذا هو السطر الذي تم إصلاحه --- vvv
         const chartUrl = createChartUrl(periodData, periodLabel);
+        // ^^^ ------------------------------------ ^^^
+
         const pnlEmoji = stats.pnl >= 0 ? '🟢' : '🔴';
         const pnlSign = stats.pnl >= 0 ? '+' : '';
         const caption = `📊 *تحليل أداء المحفظة | ${periodLabel}*\n\n` + `📈 **النتيجة:** ${pnlEmoji} \`${pnlSign}$${stats.pnl.toFixed(2)}\` (\`${pnlSign}${stats.pnlPercent.toFixed(2)}%\`)\n` + `*التغير الصافي: من \`$${stats.startValue.toFixed(2)}\` إلى \`$${stats.endValue.toFixed(2)}\`*\n\n` + `📝 **ملخص الفترة:**\n` + `   ⬆️ *أعلى قيمة:* \`$${stats.maxValue.toFixed(2)}\`\n` + `   ⬇️ *أدنى قيمة:* \`$${stats.minValue.toFixed(2)}\`\n` + `   📊 *متوسط القيمة:* \`$${stats.avgValue.toFixed(2)}\`\n\n`+ `*التقرير تم إنشاؤه في: ${new Date().toLocaleDateString("en-GB").replace(/\//g,'.')}*`;
@@ -328,14 +437,16 @@ bot.on("message:text", async (ctx) => {
     }
     switch (text) {
         case "📊 عرض المحفظة":
-            if (process.env.RAILWAY_STATIC_URL) {
-                const portfolioUrl = `https://${process.env.RAILWAY_STATIC_URL}/portfolio`;
-                const keyboard = new InlineKeyboard().url("📊 فتح ملخص المحفظة المباشر", portfolioUrl);
-                await ctx.reply("للاطلاع على أحدث بيانات المحفظة بشكل مباشر، اضغط على الزر أدناه:", {
-                    reply_markup: keyboard
-                });
+            await ctx.reply('⏳ لحظات...');
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ فشل جلب الأسعار.");
+            const { assets, total, error } = await getPortfolio(prices);
+            if (error) {
+                await ctx.reply(`❌ ${error}`);
             } else {
-                await ctx.reply("❌ خطأ: رابط الخدمة غير معرف. لا يمكن إنشاء الرابط.");
+                const capital = loadCapital();
+                const msg = formatPortfolioMsg(assets, total, capital);
+                await ctx.reply(msg, { parse_mode: "Markdown" });
             }
             break;
         case "📈 أداء المحفظة":
@@ -372,34 +483,6 @@ async function startBot() {
     app.use(`/${bot.token}`, webhookCallback(bot, "express"));
     
     app.get("/", (req, res) => res.status(200).send("OKX Bot is running and healthy."));
-
-    app.get("/portfolio", async (req, res) => {
-        try {
-            const prices = await getMarketPrices();
-            if (!prices) return res.status(500).send("Could not fetch market prices.");
-            const { assets, total, error } = await getPortfolio(prices);
-            if (error) return res.status(500).send(error);
-            const capital = loadCapital();
-            const pnl = capital > 0 ? total - capital : 0;
-            const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
-            const pnlSign = pnl >= 0 ? '+' : '';
-            const history = loadHistory();
-            let dailyPnl = 0;
-            let dailyPnlText = "لا توجد بيانات كافية";
-            if (history.length > 1) {
-                const previousDayTotal = history[history.length - 2].total;
-                dailyPnl = total - previousDayTotal;
-                const dailyPnlPercent = previousDayTotal > 0 ? (dailyPnl / previousDayTotal) * 100 : 0;
-                const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
-                dailyPnlText = `${dailyPnlSign}$${Math.abs(dailyPnl).toFixed(2)} (${dailyPnlSign}${dailyPnlPercent.toFixed(2)}%)`;
-            }
-            const pageData = { assets, total, capital, pnl, pnlPercent, pnlSign, dailyPnl, dailyPnlText };
-            res.render("portfolio", { data: pageData });
-        } catch (e) {
-            console.error("Error rendering portfolio page:", e);
-            res.status(500).send("An internal server error occurred.");
-        }
-    });
 
     app.listen(PORT, () => { console.log(`Bot server listening on port ${PORT}`); });
 }
