@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ملخص المحفظة</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Cairo', sans-serif; 
+            background-color: #121212; 
+            color: #e0e0e0; 
+            padding: 15px; 
+            margin: 0;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            background-color: #1e1e1e; 
+            padding: 20px; 
+            border-radius: 12px;
+            border: 1px solid #333;
+        }
+        h1 { 
+            text-align: center; 
+            color: #fff; 
+            border-bottom: 1px solid #444;
+            padding-bottom: 15px;
+            margin-top: 0;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .stat { 
+            background-color: #2a2a2a; 
+            padding: 15px; 
+            border-radius: 8px; 
+        }
+        .stat-label { 
+            font-size: 0.9em; 
+            color: #aaa; 
+            margin-bottom: 5px;
+        }
+        .stat-value { 
+            font-size: 1.4em; 
+            font-weight: 700; 
+        }
+        .positive { color: #4caf50; }
+        .negative { color: #f44336; }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px; 
+        }
+        th, td { 
+            padding: 12px 10px; 
+            text-align: right; 
+            border-bottom: 1px solid #333; 
+        }
+        th { 
+            color: #bbb; 
+            font-weight: 600;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 ملخص المحفظة المباشر</h1>
+        <div class="grid">
+            <div class="stat">
+                <div class="stat-label">القيمة الحالية</div>
+                <div class="stat-value">$<%= data.total.toFixed(2) %></div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">رأس المال</div>
+                <div class="stat-value">$<%= data.capital.toFixed(2) %></div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">ربح إجمالي غير محقق</div>
+                <div class="stat-value <%= data.pnl >= 0 ? 'positive' : 'negative' %>">
+                    <%= data.pnlSign %>$<%= Math.abs(data.pnl).toFixed(2) %> (<%= data.pnlSign %><%= data.pnlPercent.toFixed(2) %>%)
+                </div>
+            </div>
+             <div class="stat">
+                <div class="stat-label">الربح/الخسارة (يومي)</div>
+                <div class="stat-value <%= data.dailyPnl >= 0 ? 'positive' : 'negative' %>">
+                    <%= data.dailyPnlText %>
+                </div>
+            </div>
+        </div>
+        
+        <h2>💎 الأصول</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>العملة</th>
+                    <th>القيمة</th>
+                    <th>الكمية</th>
+                    <th>السعر الحالي</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% data.assets.forEach(asset => { %>
+                    <tr>
+                        <td><b><%= asset.asset %></b></td>
+                        <td>$<%= asset.value.toFixed(2) %> (<%= (asset.value / data.total * 100).toFixed(1) %>%)</td>
+                        <td><%= asset.amount.toFixed(6) %></td>
+                        <td>$<%= asset.price.toFixed(4) %></td>
+                    </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
