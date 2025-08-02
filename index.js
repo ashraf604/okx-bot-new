@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v34.3 (Final with Healthcheck)
+// OKX Advanced Analytics Bot - v35 (Personalized Coin Info)
 // =================================================================
-// هذا الإصدار يحل مشكلة توقف البوت على Railway بشكل نهائي.
+// هذا الإصدار يضيف بيانات PnL شخصية لميزة "معلومات عملة".
 // =================================================================
 
 const express = require("express");
@@ -276,43 +276,45 @@ async function monitorBalanceChanges() {
     }
 }
 
-async function getInstrumentDetails(instId) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const json = await res.json(); if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` }; const data = json.data[0]; return { price: parseFloat(data.last), high24h: parseFloat(data.high24h), low24h: parseFloat(data.low24h), vol24h: parseFloat(data.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getInstrumentDetails(instId) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`);
+        const json = await res.json();
+        if (json.code !== '0' || !json.data[0]) return { error: `لم يتم العثور على العملة.` };
+        const data = json.data[0];
+        return {
+            price: parseFloat(data.last),
+            high24h: parseFloat(data.high24h),
+            low24h: parseFloat(data.low24h),
+            vol24h: parseFloat(data.volCcy24h),
+            open24h: parseFloat(data.open24h)
+        };
+    } catch (e) {
+        console.error(e);
+        return { error: "خطأ في الاتصال بالمنصة." };
+    }
+}
+
 async function checkPriceAlerts() { try { const alerts = loadAlerts(); if (alerts.length === 0) return; const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = (prices[alert.instId] || {}).price; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
 
 async function runDailyJobs() {
     try {
         console.log("Attempting to run daily jobs...");
         const settings = loadSettings();
-        if (!settings.dailySummary) {
-            console.log("Daily summary is disabled. Skipping.");
-            return;
-        }
+        if (!settings.dailySummary) { console.log("Daily summary is disabled. Skipping."); return; }
         const prices = await getMarketPrices();
-        if (!prices) {
-            console.error("Daily Jobs: Failed to get prices.");
-            return;
-        }
+        if (!prices) { console.error("Daily Jobs: Failed to get prices."); return; }
         const { total, error } = await getPortfolio(prices);
-        if (error) {
-            console.error("Daily Jobs Error:", error);
-            return;
-        }
+        if (error) { console.error("Daily Jobs Error:", error); return; }
         const history = loadHistory();
         const date = new Date().toISOString().slice(0, 10);
         const todayRecordIndex = history.findIndex(h => h.date === date);
-
-        if (todayRecordIndex > -1) {
-            history[todayRecordIndex].total = total;
-        } else {
-            history.push({ date: date, total: total });
-        }
-        
+        if (todayRecordIndex > -1) { history[todayRecordIndex].total = total; } 
+        else { history.push({ date: date, total: total }); }
         if (history.length > 35) history.shift();
         saveHistory(history);
         console.log(`[✅ Daily Summary Recorded]: ${date} - $${total.toFixed(2)}`);
-    } catch(e) {
-        console.error("CRITICAL ERROR in runDailyJobs:", e);
-    }
+    } catch(e) { console.error("CRITICAL ERROR in runDailyJobs:", e); }
 }
 
 async function runHourlyJobs() { try { const prices = await getMarketPrices(); if (!prices) return; const { total, error } = await getPortfolio(prices); if (error) return; const hourlyHistory = loadHourlyHistory(); const now = new Date(); const label = `${now.getHours()}:00`; hourlyHistory.push({ label: label, total: total }); if (hourlyHistory.length > 24) hourlyHistory.shift(); saveHourlyHistory(hourlyHistory); console.log(`[✅ Hourly Summary]: ${now.toISOString()} - $${total.toFixed(2)}`); } catch(e) { console.error("CRITICAL ERROR in runHourlyJobs:", e); } }
@@ -350,8 +352,50 @@ bot.on("message:text", async (ctx) => {
             case 'add_position_state': const parts_add = text.split(/\s+/); if (parts_add.length !== 2) { return await ctx.reply("❌ صيغة غير صحيحة."); return; } const [symbol_add, priceStr_add] = parts_add; const price_add = parseFloat(priceStr_add); if (isNaN(price_add) || price_add <= 0) { await ctx.reply("❌ السعر غير صالح."); return; } const positions_add = loadPositions(); positions_add[symbol_add.toUpperCase()] = { avgBuyPrice: price_add }; savePositions(positions_add); await ctx.reply(`✅ *تم تحديث متوسط الشراء*\n\n🔸 **العملة:** ${symbol_add.toUpperCase()}\n💰 **السعر الجديد:** \`$${price_add.toFixed(4)}\``, { parse_mode: "Markdown" }); return;
             case 'delete_position_state': const symbol_delete = text.toUpperCase(); const positions_delete = loadPositions(); if (positions_delete[symbol_delete]) { delete positions_delete[symbol_delete]; savePositions(positions_delete); await ctx.reply(`✅ تم حذف متوسط شراء *${symbol_delete}* بنجاح.`); } else { await ctx.reply(`❌ لم يتم العثور على مركز مسجل للعملة *${symbol_delete}*.`); } return;
             case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { saveCapital(amount); await ctx.reply(`✅ *تم تحديث رأس المال*\n\n💰 **المبلغ الجديد:** \`$${amount.toFixed(2)}\``, {parse_mode: "Markdown"}); } else { await ctx.reply("❌ مبلغ غير صالح."); } return;
-            case 'coin_info': const { error, ...details } = await getInstrumentDetails(text); if (error) { await ctx.reply(`❌ ${error}`); } else { let msg = `ℹ️ *معلومات عملة | ${text.toUpperCase()}*\n\n` + `   💲 *السعر الحالي:* \`$${details.price}\`\n` + `   📈 *أعلى سعر (24س):* \`$${details.high24h}\`\n` + `   📉 *أدنى سعر (24س):* \`$${details.low24h}\`\n` + `   📊 *حجم التداول (24س):* \`$${details.vol24h.toLocaleString()}\`\n\n`+ `*البيانات من منصة OKX*`; await ctx.reply(msg, { parse_mode: "Markdown" }); } return;
-            case 'set_alert': const parts = text.trim().split(/\s+/); if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة."); const [instId, condition, priceStr] = parts; const price = parseFloat(priceStr); if (!['>', '<'].includes(condition) || isNaN(price)) return await ctx.reply("❌ صيغة غير صحيحة."); const alerts = loadAlerts(); const newAlert = { id: crypto.randomBytes(4).toString('hex'), instId: instId.toUpperCase(), condition, price }; alerts.push(newAlert); saveAlerts(alerts); await ctx.reply(`🔔 *تم ضبط تنبيه جديد*\n\n🔸 **التنبيه:** \`${newAlert.instId} ${newAlert.condition} ${newAlert.price}\``, { parse_mode: "Markdown" }); return;
+            case 'coin_info':
+                const instId = text.toUpperCase();
+                const { error, ...details } = await getInstrumentDetails(instId);
+                if (error) {
+                    await ctx.reply(`❌ ${error}`);
+                } else {
+                    let msg = `ℹ️ *معلومات عملة | ${instId}*\n\n` +
+                              `   💲 *السعر الحالي:* \`$${details.price}\`\n` +
+                              `   📈 *أعلى سعر (24س):* \`$${details.high24h}\`\n` +
+                              `   📉 *أدنى سعر (24س):* \`$${details.low24h}\`\n` +
+                              `   📊 *حجم التداول (24س):* \`$${details.vol24h.toLocaleString()}\`\n\n` +
+                              `*البيانات من منصة OKX*`;
+            
+                    const prices = await getMarketPrices();
+                    if (prices) {
+                        const { assets: userAssets } = await getPortfolio(prices);
+                        const coinSymbol = instId.split('-')[0];
+                        const ownedAsset = userAssets.find(a => a.asset === coinSymbol);
+                        const positions = loadPositions();
+                        const assetPosition = positions[coinSymbol];
+            
+                        if (ownedAsset && assetPosition) {
+                            const amount = ownedAsset.amount;
+                            const avgBuyPrice = assetPosition.avgBuyPrice;
+            
+                            const totalPnl = (details.price - avgBuyPrice) * amount;
+                            const totalPnlPercent = (avgBuyPrice * amount > 0) ? (totalPnl / (avgBuyPrice * amount)) * 100 : 0;
+                            const totalPnlEmoji = totalPnl >= 0 ? '🟢' : '🔴';
+                            const totalPnlSign = totalPnl >= 0 ? '+' : '';
+            
+                            const dailyPnl = (details.price - details.open24h) * amount;
+                            const dailyPnlEmoji = dailyPnl >= 0 ? '🟢' : '🔴';
+                            const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
+            
+                            msg += `\n\n━━━━━━━━━━━━━━━━━━━━\n` +
+                                   `📊 *موقفك في العملة:*\n` +
+                                   `   - *ربح إجمالي غير محقق:* ${totalPnlEmoji} \`${totalPnlSign}${totalPnl.toFixed(2)}\` (\`${totalPnlSign}${totalPnlPercent.toFixed(2)}%\`)\n` +
+                                   `   - *الربح/الخسارة (آخر 24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${dailyPnl.toFixed(2)}\``;
+                        }
+                    }
+                    await ctx.reply(msg, { parse_mode: "Markdown" });
+                }
+                return;
+            case 'set_alert': const parts = text.trim().split(/\s+/); if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة."); const [instId_alert, condition, priceStr] = parts; const price = parseFloat(priceStr); if (!['>', '<'].includes(condition) || isNaN(price)) return await ctx.reply("❌ صيغة غير صحيحة."); const alerts = loadAlerts(); const newAlert = { id: crypto.randomBytes(4).toString('hex'), instId: instId_alert.toUpperCase(), condition, price }; alerts.push(newAlert); saveAlerts(alerts); await ctx.reply(`🔔 *تم ضبط تنبيه جديد*\n\n🔸 **التنبيه:** \`${newAlert.instId} ${newAlert.condition} ${newAlert.price}\``, { parse_mode: "Markdown" }); return;
             case 'delete_alert': const currentAlerts = loadAlerts(); const filteredAlerts = currentAlerts.filter(a => a.id !== text); if (currentAlerts.length === filteredAlerts.length) { await ctx.reply(`❌ لم يتم العثور على تنبيه بالـ ID.`); } else { saveAlerts(filteredAlerts); await ctx.reply(`🗑️ *تم حذف التنبيه بنجاح*`); } return;
             case 'confirm_delete_all': if (text.toLowerCase() === 'تأكيد الحذف') { if (fs.existsSync(CAPITAL_FILE)) fs.unlinkSync(CAPITAL_FILE); if (fs.existsSync(ALERTS_FILE)) fs.unlinkSync(ALERTS_FILE); if (fs.existsSync(HISTORY_FILE)) fs.unlinkSync(HISTORY_FILE); if(fs.existsSync(HOURLY_HISTORY_FILE)) fs.unlinkSync(HOURLY_HISTORY_FILE); if (fs.existsSync(SETTINGS_FILE)) fs.unlinkSync(SETTINGS_FILE); if (fs.existsSync(POSITIONS_FILE)) fs.unlinkSync(POSITIONS_FILE); if (fs.existsSync(BALANCE_STATE_FILE)) fs.unlinkSync(BALANCE_STATE_FILE); if(fs.existsSync(ALERT_SETTINGS_FILE)) fs.unlinkSync(ALERT_SETTINGS_FILE); if(fs.existsSync(PRICE_TRACKER_FILE)) fs.unlinkSync(PRICE_TRACKER_FILE); await ctx.reply("🔥 تم حذف جميع البيانات بنجاح."); } else { await ctx.reply("🛑 تم إلغاء عملية الحذف."); } return;
         }
