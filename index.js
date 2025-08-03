@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v39 (Final Stable Version)
+// OKX Advanced Analytics Bot - v39 (Accurate 7-Day Range)
 // =================================================================
-// This is the final, stable version with MongoDB and all working features.
+// This version provides an accurate 7-day high/low in the coin info feature.
 // =================================================================
 
 const express = require("express");
@@ -50,7 +50,38 @@ function getHeaders(method, path, body = "") { const timestamp = new Date().toIS
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => { prices[t.instId] = { price: parseFloat(t.last), change24h: parseFloat(t.chg24h) || 0 }; }); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
 async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const price = priceData.price; const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price: price, value: value, amount: amount, change24h: priceData.change24h }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
-async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1W&limit=1`); const candleJson = await candleRes.json(); let weeklyData = { high: 0, low: 0, date: "N/A" }; if (candleJson.code === '0' && candleJson.data[0]) { const candle = candleJson.data[0]; weeklyData.date = new Date(parseInt(candle[0])).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric' }); weeklyData.high = parseFloat(candle[2]); weeklyData.low = parseFloat(candle[3]); } return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), open24h: parseFloat(tickerData.open24h), weeklyHigh: weeklyData.high, weeklyLow: weeklyData.low, weeklyDate: weeklyData.date }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+
+async function getInstrumentDetails(instId) {
+    try {
+        const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`);
+        const tickerJson = await tickerRes.json();
+        if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` };
+        const tickerData = tickerJson.data[0];
+
+        const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1D&limit=7`);
+        const candleJson = await candleRes.json();
+        let weeklyData = { high: 0, low: 0 };
+        if (candleJson.code === '0' && candleJson.data.length > 0) {
+            const highs = candleJson.data.map(c => parseFloat(c[2]));
+            const lows = candleJson.data.map(c => parseFloat(c[3]));
+            weeklyData.high = Math.max(...highs);
+            weeklyData.low = Math.min(...lows);
+        }
+
+        return {
+            price: parseFloat(tickerData.last),
+            high24h: parseFloat(tickerData.high24h),
+            low24h: parseFloat(tickerData.low24h),
+            vol24h: parseFloat(tickerData.volCcy24h),
+            open24h: parseFloat(tickerData.open24h),
+            weeklyHigh: weeklyData.high,
+            weeklyLow: weeklyData.low
+        };
+    } catch (e) {
+        console.error(e);
+        return { error: "خطأ في الاتصال بالمنصة." };
+    }
+}
 function createChartUrl(history, periodLabel) { if (history.length < 2) return null; const labels = history.map(h => h.label); const data = history.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values[0]; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
 
@@ -278,7 +309,7 @@ bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (ctx.message.text && ctx.message.text.startsWith('/')) {
         const command = ctx.message.text.split(' ')[0].slice(1).toLowerCase();
-        const knownCommands = ['start', 'settings', 'pnl', 'avg'];
+        const knownCommands = ['start', 'settings', 'pnl', 'avg', 'unlocks'];
         if (!knownCommands.includes(command)){
              await ctx.reply("لم أتعرف على هذا الأمر.");
         }
@@ -304,9 +335,9 @@ bot.on("message:text", async (ctx) => {
                               `   💲 *السعر الحالي:* \`$${details.price.toFixed(4)}\`\n` +
                               `   📈 *أعلى سعر (24س):* \`$${details.high24h.toFixed(4)}\`\n` +
                               `   📉 *أدنى سعر (24س):* \`$${details.low24h.toFixed(4)}\`\n\n` +
-                              `   📅 *الأسبوع (يبدأ من ${details.weeklyDate}):*\n` +
-                              `   ⬆️ *أعلى سعر أسبوعي:* \`$${details.weeklyHigh.toFixed(4)}\`\n` +
-                              `   ⬇️ *أدنى سعر أسبوعي:* \`$${details.weeklyLow.toFixed(4)}\`\n\n` +
+                              `   📅 *النطاق الأسبوعي (آخر 7 أيام):*\n` +
+                              `   ⬆️ *أعلى سعر:* \`$${details.weeklyHigh.toFixed(4)}\`\n` +
+                              `   ⬇️ *أدنى سعر:* \`$${details.weeklyLow.toFixed(4)}\`\n\n` +
                               `   📊 *حجم التداول (24س):* \`$${details.vol24h.toLocaleString()}\`\n\n` +
                               `*البيانات من منصة OKX*`;
             
