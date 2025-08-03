@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v38.1 (Command Handling Fix - Complete)
+// OKX Advanced Analytics Bot - v38.2 (Startup Logic Fix)
 // =================================================================
-// This version fixes the command handling logic and is complete.
+// This version fixes the startup order to pass Railway health checks.
 // =================================================================
 
 const express = require("express");
@@ -294,20 +294,21 @@ bot.on("callback_query:data", async (ctx) => {
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (ctx.message.text && ctx.message.text.startsWith('/')) {
-        const command = ctx.message.text.split(' ')[0];
-        if (command !== '/unlocks' && command !== '/start' && command !== '/settings' && command !== '/pnl' && command !== '/avg') {
-            await ctx.reply("لم أتعرف على هذا الأمر.");
+        const command = ctx.message.text.split(' ')[0].slice(1);
+        const knownCommands = ['start', 'settings', 'pnl', 'avg', 'unlocks'];
+        if (!knownCommands.includes(command)){
+             await ctx.reply("لم أتعرف على هذا الأمر.");
         }
-        return;
+        return; 
     }
-
+    
     if (waitingState) {
         const state = waitingState;
         waitingState = null;
         switch (state) {
             case 'set_global_alert_state': const percent = parseFloat(text); if (isNaN(percent) || percent <= 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا موجبًا."); } let alertSettingsGlobal = await loadAlertSettings(); alertSettingsGlobal.global = percent; await saveAlertSettings(alertSettingsGlobal); await ctx.reply(`✅ تم تحديث النسبة العامة إلى \`${percent}%\`.`); return;
             case 'set_coin_alert_state': const parts_coin_alert = text.split(/\s+/); if (parts_coin_alert.length !== 2) { return await ctx.reply("❌ *صيغة غير صحيحة*. يرجى إرسال رمز العملة ثم النسبة."); } const [symbol_coin_alert, percentStr_coin_alert] = parts_coin_alert; const coinPercent = parseFloat(percentStr_coin_alert); if (isNaN(coinPercent) || coinPercent < 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا."); } let alertSettingsCoin = await loadAlertSettings(); if (coinPercent === 0) { delete alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()]; await ctx.reply(`✅ تم حذف النسبة المخصصة لـ *${symbol_coin_alert.toUpperCase()}* وستتبع النسبة العامة.`); } else { alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()] = coinPercent; await ctx.reply(`✅ تم تحديث النسبة المخصصة لـ *${symbol_coin_alert.toUpperCase()}* إلى \`${coinPercent}%\`.`); } await saveAlertSettings(alertSettingsCoin); return;
-            case 'add_position_state': const parts_add = text.split(/\s+/); if (parts_add.length !== 2) { return await ctx.reply("❌ صيغة غير صحيحة."); return; } const [symbol_add, priceStr_add] = parts_add; const price_add = parseFloat(priceStr_add); if (isNaN(price_add) || price_add <= 0) { await ctx.reply("❌ السعر غير صالح."); return; } const positions_add = await loadPositions(); positions_add[symbol_add.toUpperCase()] = { avgBuyPrice: price_add }; await savePositions(positions_add); await ctx.reply(`✅ *تم تحديث متوسط الشراء*\n\n🔸 **العملة:** ${symbol_add.toUpperCase()}\n💰 **السعر الجديد:** \`$${price_add.toFixed(4)}\``, { parse_mode: "Markdown" }); return;
+            case 'add_position_state': const parts_add = text.split(/\s+/); if (parts_add.length !== 2) { return await ctx.reply("❌ صيغة غير صحيحة."); return; } const [symbol_add, priceStr_add] = parts_add; const price_add = parseFloat(priceStr_add); if (isNaN(price_add) || price_add <= 0) { await ctx.reply("❌ السعر غير صالح."); return; } const positions_add = await loadPositions(); positions_add[symbol_add.toUpperCase()] = { avgBuyPrice: price_add }; await savePositions(positions_add); await ctx.reply(`✅ *تم تحديث متوسط شراء*\n\n🔸 **العملة:** ${symbol_add.toUpperCase()}\n💰 **السعر الجديد:** \`$${price_add.toFixed(4)}\``, { parse_mode: "Markdown" }); return;
             case 'delete_position_state': const symbol_delete = text.toUpperCase(); const positions_delete = await loadPositions(); if (positions_delete[symbol_delete]) { delete positions_delete[symbol_delete]; await savePositions(positions_delete); await ctx.reply(`✅ تم حذف متوسط شراء *${symbol_delete}* بنجاح.`); } else { await ctx.reply(`❌ لم يتم العثور على مركز مسجل للعملة *${symbol_delete}*.`); } return;
             case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { await saveCapital(amount); await ctx.reply(`✅ *تم تحديث رأس المال*\n\n💰 **المبلغ الجديد:** \`$${amount.toFixed(2)}\``, {parse_mode: "Markdown"}); } else { await ctx.reply("❌ مبلغ غير صالح."); } return;
             case 'coin_info':
