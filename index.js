@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v38.2 (Final Stable & Complete)
+// OKX Advanced Analytics Bot - v38.3 (Robust Token Unlocks)
 // =================================================================
-// This version uses MongoDB, includes the /unlocks command, and is complete.
+// This version uses a robust, ID-based method for the /unlocks command.
 // =================================================================
 
 const express = require("express");
@@ -53,7 +53,48 @@ async function getBalanceForComparison() { try { const path = "/api/v5/account/b
 async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1W&limit=1`); const candleJson = await candleRes.json(); let weeklyData = { high: 0, low: 0, date: "N/A" }; if (candleJson.code === '0' && candleJson.data[0]) { const candle = candleJson.data[0]; weeklyData.date = new Date(parseInt(candle[0])).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric' }); weeklyData.high = parseFloat(candle[2]); weeklyData.low = parseFloat(candle[3]); } return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), open24h: parseFloat(tickerData.open24h), weeklyHigh: weeklyData.high, weeklyLow: weeklyData.low, weeklyDate: weeklyData.date }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 function createChartUrl(history, periodLabel) { if (history.length < 2) return null; const labels = history.map(h => h.label); const data = history.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values[0]; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
-async function getTokenUnlocks(symbol) { try { const searchSymbol = symbol.toLowerCase(); const searchRes = await fetch(`https://api.cryptorank.io/v1/currencies?search=${searchSymbol}&limit=1`); const searchJson = await searchRes.json(); if (!searchJson.data || searchJson.data.length === 0 || searchJson.data[0].symbol.toLowerCase() !== searchSymbol) { return { error: `لم يتم العثور على العملة بالرمز: ${symbol.toUpperCase()}` }; } const currencyId = searchJson.data[0].id; const unlocksRes = await fetch(`https://api.cryptorank.io/v1/vesting?currencyId=${currencyId}`); const unlocksJson = await unlocksRes.json(); const now = new Date(); now.setHours(0, 0, 0, 0); const upcomingUnlocks = unlocksJson.data.filter(event => new Date(event.date).getTime() >= now.getTime()).sort((a, b) => new Date(a.date) - new Date(b.date)); if (upcomingUnlocks.length === 0) { return { message: "اكتملت جميع الإفراجات المجدولة لهذه العملة أو لا توجد بيانات." }; } return upcomingUnlocks.slice(0, 3); } catch (e) { console.error("Error in getTokenUnlocks:", e); return { error: "حدث خطأ أثناء جلب بيانات الإفراجات." }; } }
+
+// vvv --- الدالة التي تم إصلاحها --- vvv
+async function getTokenUnlocks(symbol) {
+    // قائمة بالمعرفات الثابتة للعملات الشهيرة لتجنب البحث الفاشل
+    const coinIdMap = {
+        'SUI': 16952,
+        'WLD': 18536,
+        'ARB': 17732,
+        'OP': 15877,
+        'DYDX': 10543,
+        'BTC': 1,
+        'ETH': 80
+    };
+
+    try {
+        const currencyId = coinIdMap[symbol.toUpperCase()];
+        if (!currencyId) {
+            return { error: `بيانات الإفراج غير مدعومة حاليًا لهذه العملة: ${symbol.toUpperCase()}` };
+        }
+
+        const unlocksRes = await fetch(`https://api.cryptorank.io/v1/vesting?currencyId=${currencyId}`);
+        const unlocksJson = await unlocksRes.json();
+        
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+
+        const upcomingUnlocks = unlocksJson.data
+            .filter(event => new Date(event.date).getTime() >= now.getTime())
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        if (upcomingUnlocks.length === 0) {
+            return { message: "اكتملت جميع الإفراجات المجدولة لهذه العملة أو لا توجد بيانات." };
+        }
+        
+        return upcomingUnlocks.slice(0, 3);
+
+    } catch (e) {
+        console.error("Error in getTokenUnlocks:", e);
+        return { error: "حدث خطأ أثناء جلب بيانات الإفراجات." };
+    }
+}
+// ^^^ --- نهاية الدالة التي تم إصلاحها --- ^^^
 
 // === Core Logic & Bot Handlers ===
 async function formatPortfolioMsg(assets, total, capital) {
