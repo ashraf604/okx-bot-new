@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v38.2 (Startup Logic Fix)
+// OKX Advanced Analytics Bot - v38.2 (Final Stable & Complete)
 // =================================================================
-// This version fixes the startup order to pass Railway health checks.
+// This version uses MongoDB, includes the /unlocks command, and is complete.
 // =================================================================
 
 const express = require("express");
@@ -53,7 +53,7 @@ async function getBalanceForComparison() { try { const path = "/api/v5/account/b
 async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1W&limit=1`); const candleJson = await candleRes.json(); let weeklyData = { high: 0, low: 0, date: "N/A" }; if (candleJson.code === '0' && candleJson.data[0]) { const candle = candleJson.data[0]; weeklyData.date = new Date(parseInt(candle[0])).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', year: 'numeric' }); weeklyData.high = parseFloat(candle[2]); weeklyData.low = parseFloat(candle[3]); } return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), open24h: parseFloat(tickerData.open24h), weeklyHigh: weeklyData.high, weeklyLow: weeklyData.low, weeklyDate: weeklyData.date }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 function createChartUrl(history, periodLabel) { if (history.length < 2) return null; const labels = history.map(h => h.label); const data = history.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values[0]; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
-async function getTokenUnlocks(symbol) { try { const searchRes = await fetch(`https://api.cryptorank.io/v1/currencies?search=${symbol.toUpperCase()}&limit=1`); const searchJson = await searchRes.json(); if (!searchJson.data || searchJson.data.length === 0 || searchJson.data[0].symbol.toUpperCase() !== symbol.toUpperCase()) { return { error: `لم يتم العثور على العملة بالرمز: ${symbol}` }; } const currencyId = searchJson.data[0].id; const unlocksRes = await fetch(`https://api.cryptorank.io/v1/vesting?currencyId=${currencyId}`); const unlocksJson = await unlocksRes.json(); const now = new Date(); now.setHours(0, 0, 0, 0); const upcomingUnlocks = unlocksJson.data.filter(event => new Date(event.date).getTime() >= now.getTime()).sort((a, b) => new Date(a.date) - new Date(b.date)); if (upcomingUnlocks.length === 0) { return { message: "اكتملت جميع الإفراجات المجدولة لهذه العملة أو لا توجد بيانات." }; } return upcomingUnlocks.slice(0, 3); } catch (e) { console.error("Error in getTokenUnlocks:", e); return { error: "حدث خطأ أثناء جلب بيانات الإفراجات." }; } }
+async function getTokenUnlocks(symbol) { try { const searchSymbol = symbol.toLowerCase(); const searchRes = await fetch(`https://api.cryptorank.io/v1/currencies?search=${searchSymbol}&limit=1`); const searchJson = await searchRes.json(); if (!searchJson.data || searchJson.data.length === 0 || searchJson.data[0].symbol.toLowerCase() !== searchSymbol) { return { error: `لم يتم العثور على العملة بالرمز: ${symbol.toUpperCase()}` }; } const currencyId = searchJson.data[0].id; const unlocksRes = await fetch(`https://api.cryptorank.io/v1/vesting?currencyId=${currencyId}`); const unlocksJson = await unlocksRes.json(); const now = new Date(); now.setHours(0, 0, 0, 0); const upcomingUnlocks = unlocksJson.data.filter(event => new Date(event.date).getTime() >= now.getTime()).sort((a, b) => new Date(a.date) - new Date(b.date)); if (upcomingUnlocks.length === 0) { return { message: "اكتملت جميع الإفراجات المجدولة لهذه العملة أو لا توجد بيانات." }; } return upcomingUnlocks.slice(0, 3); } catch (e) { console.error("Error in getTokenUnlocks:", e); return { error: "حدث خطأ أثناء جلب بيانات الإفراجات." }; } }
 
 // === Core Logic & Bot Handlers ===
 async function formatPortfolioMsg(assets, total, capital) {
@@ -231,21 +231,21 @@ bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); 
 bot.command("avg", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 2 || args[0] === '') { return await ctx.reply("❌ *صيغة غير صحيحة.*\n\n" + "استخدم: `/avg <SYMBOL> <PRICE>`\n\n" + "*مثال:*\n`/avg OP 1.50`", { parse_mode: "Markdown" }); } const [symbol, priceStr] = args; const price = parseFloat(priceStr); if (isNaN(price) || price <= 0) { return await ctx.reply("❌ *خطأ:* السعر يجب أن يكون رقمًا موجبًا."); } const positions = await loadPositions(); positions[symbol.toUpperCase()] = { avgBuyPrice: price }; await savePositions(positions); await ctx.reply(`✅ *تم تحديث متوسط الشراء*\n\n🔸 **العملة:** ${symbol.toUpperCase()}\n💰 **السعر الجديد:** \`$${price.toFixed(4)}\``, { parse_mode: "Markdown" }); });
 
 bot.command("unlocks", async (ctx) => {
-    const symbol = ctx.match.trim().toUpperCase();
+    const symbol = ctx.match.trim();
     if (!symbol) { return await ctx.reply("يرجى تحديد رمز العملة بعد الأمر.\n*مثال:* `/unlocks SUI`", { parse_mode: "Markdown" }); }
-    await ctx.reply(`🔍 جارٍ البحث عن جدول إفراجات عملة *${symbol}*...`, { parse_mode: "Markdown" });
+    await ctx.reply(`🔍 جارٍ البحث عن جدول إفراجات عملة *${symbol.toUpperCase()}*...`, { parse_mode: "Markdown" });
     const results = await getTokenUnlocks(symbol);
     if (results.error) { return await ctx.reply(`❌ ${results.error}`); }
-    if (results.message) { return await ctx.reply(`✅ *${symbol}:* ${results.message}`); }
-    let msg = `🗓️ **الإفراجات القادمة لعملة ${symbol}**\n`;
+    if (results.message) { return await ctx.reply(`✅ *${symbol.toUpperCase()}:* ${results.message}`); }
+    let msg = `🗓️ **الإفراجات القادمة لعملة ${symbol.toUpperCase()}**\n`;
     results.forEach(unlock => {
         const unlockDate = new Date(unlock.date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
         const amount = unlock.tokens;
         const percentOfSupply = unlock.percentOfCirculatingSupply;
         msg += `\n━━━━━━━━━━━━\n`;
         msg += `*التاريخ:* \`${unlockDate}\`\n`;
-        msg += `*الكمية:* \`${amount.toLocaleString('en-US')}\` *${symbol}*\n`;
-        msg += `*تمثل:* \`${percentOfSupply.toFixed(2)}%\` *من المعروض المتداول*`;
+        msg += `*الكمية:* \`${amount.toLocaleString('en-US')}\` *${symbol.toUpperCase()}*\n`;
+        msg += `*تمثل:* \`${percentOfSupply ? percentOfSupply.toFixed(2) : 'N/A'}%\` *من المعروض المتداول*`;
     });
     msg += `\n\n*المصدر: CryptoRank*`;
     await ctx.reply(msg, { parse_mode: "Markdown" });
@@ -294,7 +294,7 @@ bot.on("callback_query:data", async (ctx) => {
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (ctx.message.text && ctx.message.text.startsWith('/')) {
-        const command = ctx.message.text.split(' ')[0].slice(1);
+        const command = ctx.message.text.split(' ')[0].slice(1).toLowerCase();
         const knownCommands = ['start', 'settings', 'pnl', 'avg', 'unlocks'];
         if (!knownCommands.includes(command)){
              await ctx.reply("لم أتعرف على هذا الأمر.");
@@ -385,26 +385,16 @@ bot.on("message:text", async (ctx) => {
     }
 });
 
-// --- بدء تشغيل البوت ---
 async function startBot() {
     console.log("Starting bot process...");
-
-    // الخطوة 1: ابدأ الخادم أولاً للرد على Railway فورًا
     app.use(express.json());
     app.use(`/${bot.token}`, webhookCallback(bot, "express"));
     app.get("/", (req, res) => res.status(200).send("OKX Bot is healthy and running."));
-    app.listen(PORT, () => { 
-        console.log(`Bot server is listening on port ${PORT}. Now connecting to database...`);
-    });
-
-    // الخطوة 2: ثم اتصل بقاعدة البيانات
+    app.listen(PORT, () => { console.log(`Bot server is listening on port ${PORT}. Now connecting to database...`); });
     await connectDB();
     console.log("Database connection successful. Initializing scheduled jobs.");
-
-    // الخطوة 3: شغل المهام المجدولة بعد التأكد من الاتصال بقاعدة البيانات
     runDailyJobs(); 
     runHourlyJobs();
-
     setInterval(monitorBalanceChanges, 1 * 60 * 1000);
     setInterval(runDailyJobs, 24 * 60 * 60 * 1000);
     setInterval(runHourlyJobs, 1 * 60 * 60 * 1000);
@@ -413,5 +403,5 @@ async function startBot() {
 }
 
 startBot().catch(err => {
-    console.error("FATAL ERROR: Failed to start bot:", err)
+    console.error("FATAL ERROR: Failed to start bot:", err);
 });
