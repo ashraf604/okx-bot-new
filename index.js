@@ -380,7 +380,6 @@ async function startBot() {
     await connectDB();
     console.log("Starting bot...");
     
-    // Run jobs once on startup
     runDailyJobs(); 
     runHourlyJobs();
 
