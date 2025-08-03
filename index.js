@@ -385,10 +385,23 @@ bot.on("message:text", async (ctx) => {
     }
 });
 
+// --- بدء تشغيل البوت ---
 async function startBot() {
+    console.log("Starting bot process...");
+
+    // الخطوة 1: ابدأ الخادم أولاً للرد على Railway فورًا
+    app.use(express.json());
+    app.use(`/${bot.token}`, webhookCallback(bot, "express"));
+    app.get("/", (req, res) => res.status(200).send("OKX Bot is healthy and running."));
+    app.listen(PORT, () => { 
+        console.log(`Bot server is listening on port ${PORT}. Now connecting to database...`);
+    });
+
+    // الخطوة 2: ثم اتصل بقاعدة البيانات
     await connectDB();
-    console.log("Starting bot...");
-    
+    console.log("Database connection successful. Initializing scheduled jobs.");
+
+    // الخطوة 3: شغل المهام المجدولة بعد التأكد من الاتصال بقاعدة البيانات
     runDailyJobs(); 
     runHourlyJobs();
 
@@ -397,13 +410,8 @@ async function startBot() {
     setInterval(runHourlyJobs, 1 * 60 * 60 * 1000);
     setInterval(checkPriceAlerts, 5 * 60 * 1000);
     setInterval(checkPriceMovements, 10 * 60 * 1000);
-
-    app.use(express.json());
-    app.use(`/${bot.token}`, webhookCallback(bot, "express"));
-    app.get("/", (req, res) => res.status(200).send("OKX Bot is healthy."));
-    app.listen(PORT, () => { console.log(`Bot server listening on port ${PORT}`); });
 }
 
 startBot().catch(err => {
-    console.error("FATAL ERROR: Failed to start bot:", err);
+    console.error("FATAL ERROR: Failed to start bot:", err)
 });
