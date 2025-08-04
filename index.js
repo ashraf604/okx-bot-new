@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v47 (Final, with Error Handling Fix)
+// OKX Advanced Analytics Bot - v47 (Final, with Crash Fix)
 // =================================================================
 // This version includes a critical fix for the "callback query older
 // than 48 hours" error, making the bot stable and robust against crashes.
