@@ -1,9 +1,9 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v47 (Final, with Crash Fix)
+// OKX Advanced Analytics Bot - v48 (Defensive Crash-Proof Fix)
 // =================================================================
-// This version includes a critical fix for the "callback query older
-// than 48 hours" error, making the bot stable and robust against crashes.
-// This is the definitive, complete, and verified version.
+// This version implements defensive coding to prevent crashes caused by
+// corrupt or incomplete database entries, specifically fixing the
+// "Cannot read properties of undefined (reading 'toFixed')" error.
 // =================================================================
 
 const express = require("express");
@@ -88,7 +88,7 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
                     efficiencyText = `\n   - *كفاءة الخروج:* لقد حققت **${exitEfficiency.toFixed(1)}%** من أقصى ربح ممكن.`;
                 }
             }
-            retrospectiveReport = `✅ **تم إغلاق مركز ${asset}**\n\n` + `*النتيجة النهائية:* ${pnlEmoji} ربح \`${finalPnl >= 0 ? '+' : ''}${finalPnl.toFixed(2)}$\` (\`${finalPnl >= 0 ? '+' : ''}${finalPnlPercent.toFixed(2)}%\`)\n\n` + `**تحليل الأداء:**\n` + `   - *متوسط الشراء:* \`$${position.avgBuyPrice.toFixed(4)}\`\n` + `   - *متوسط البيع:* \`$${avgSellPrice.toFixed(4)}\`\n` + `   - *أعلى سعر خلال الاحتفاظ:* \`$${peakPrice.toFixed(4)}\`` + efficiencyText;
+            retrospectiveReport = `✅ **تم إغلاق مركز ${asset}**\n\n` + `*النتيجة النهائية:* ${pnlEmoji} ربح \`${finalPnl >= 0 ? '+' : ''}${finalPnl.toFixed(2)}\` (\`${finalPnl >= 0 ? '+' : ''}${finalPnlPercent.toFixed(2)}%\`)\n\n` + `**تحليل الأداء:**\n` + `   - *متوسط الشراء:* \`$${position.avgBuyPrice.toFixed(4)}\`\n` + `   - *متوسط البيع:* \`$${avgSellPrice.toFixed(4)}\`\n` + `   - *أعلى سعر خلال الاحتفاظ:* \`$${peakPrice.toFixed(4)}\`` + efficiencyText;
             delete positions[asset];
         } else { // Partial Sell
             await sendDebugMessage(`Partial sell for ${asset} recorded.`);
@@ -285,29 +285,31 @@ const mainKeyboard = new Keyboard()
 async function sendSettingsMenu(ctx) { const settings = await loadSettings(); const settingsKeyboard = new InlineKeyboard().text("💰 تعيين رأس المال", "set_capital").text("💼 عرض المراكز", "view_positions").row().text("🗑️ حذف تنبيه سعر", "delete_alert").text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row().text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row().text("🔥 حذف كل البيانات 🔥", "delete_all_data"); const text = "⚙️ *لوحة التحكم والإعدادات الرئيسية*"; try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } }
 
 bot.use(async (ctx, next) => { if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); } else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); } });
-bot.command("start", async (ctx) => { await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v47 - Error Handling Fix*`, { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
+bot.command("start", async (ctx) => { await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v48 - Crash-Proof Fix*`, { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
 bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply(`❌ *صيغة غير صحيحة*\n\n` + `*يرجى استخدام الصيغة الصحيحة للأمر.*\n\n` + `*مثال:*\n\`/pnl <شراء> <بيع> <كمية>\``, { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن القيم أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const pnlSign = profitOrLoss >= 0 ? '+' : ''; const responseMessage = `🧮 *نتيجة حساب الربح والخسارة*\n\n` + `📝 **المدخلات:**\n` + `   - *سعر الشراء:* \`$${buyPrice.toLocaleString()}\`\n` + `   - *سعر البيع:* \`$${sellPrice.toLocaleString()}\`\n` + `   - *الكمية:* \`${quantity.toLocaleString()}\`\n\n` + `📊 **النتائج:**\n` + `   - *إجمالي الشراء:* \`$${totalInvestment.toLocaleString()}\`\n` + `   - *إجمالي البيع:* \`$${totalSaleValue.toLocaleString()}\`\n` + `   - *صافي الربح:* \`${pnlSign}${profitOrLoss.toLocaleString()}\` (\`${pnlSign}${pnlPercentage.toFixed(2)}%\`)\n\n` + `**${resultStatus}**`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
 
 bot.on("callback_query:data", async (ctx) => {
-    // vvv --- الإصلاح الحاسم لمشكلة التوقف --- vvv
-    try {
-        await ctx.answerCallbackQuery();
-    } catch (e) {
-        // This can happen if the callback query is too old. Ignore it.
-        console.log("Could not answer old callback query, ignoring. Error:", e.message);
-    }
-    // ^^^ --- نهاية الإصلاح --- ^^^
-
+    try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Could not answer old callback query, ignoring. Error:", e.message); }
     const data = ctx.callbackQuery.data;
 
     if (data.startsWith("chart_")) {
+        // vvv --- الإصلاح النهائي: إضافة فحص للتأكد من وجود رسالة قبل تعديلها --- vvv
+        if (!ctx.callbackQuery.message) return;
+        // ^^^ --- نهاية الإصلاح --- ^^^
         const period = data.split('_')[1];
         await ctx.editMessageText("⏳ جاري إنشاء التقرير...");
         let history, periodLabel, periodData;
         if (period === '24h') { history = await loadHourlyHistory(); periodLabel = "آخر 24 ساعة"; periodData = history.slice(-24); }
         else if (period === '7d') { history = await loadHistory(); periodLabel = "آخر 7 أيام"; periodData = history.slice(-7).map(h => ({ label: h.date.slice(5), total: h.total })); }
         else if (period === '30d') { history = await loadHistory(); periodLabel = "آخر 30 يومًا"; periodData = history.slice(-30).map(h => ({ label: h.date.slice(5), total: h.total })); }
+        
+        // vvv --- الإصلاح النهائي: إضافة فحص قبل استخدام toFixed --- vvv
+        if (!periodData || periodData.length < 2) {
+             await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة.");
+             return;
+        }
+        // ^^^ --- نهاية الإصلاح --- ^^^
         const stats = calculatePerformanceStats(periodData);
         if (!stats) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
         const chartUrl = createChartUrl(periodData, periodLabel);
@@ -343,9 +345,14 @@ bot.on("callback_query:data", async (ctx) => {
                 for (const symbol in positions) {
                     const pos = positions[symbol];
                     msg += `\n╭─ *${symbol}*`;
-                    msg += `\n├─ 🛒 *متوسط الشراء:* \`$${pos.avgBuyPrice.toFixed(4)}\``;
-                    msg += `\n├─ 📦 *الكمية المشتراة:* \`${pos.totalAmountBought.toFixed(6)}\``;
-                    msg += `\n╰─ 🗓️ *تاريخ الفتح:* \`${new Date(pos.openDate).toLocaleDateString('en-GB')}\``;
+                    // vvv --- الإصلاح النهائي: إضافة فحص قبل استخدام toFixed --- vvv
+                    const avgBuyPriceText = pos.avgBuyPrice ? `$${pos.avgBuyPrice.toFixed(4)}` : 'غير متاح';
+                    const totalAmountText = pos.totalAmountBought ? pos.totalAmountBought.toFixed(6) : 'غير متاح';
+                    const openDateText = pos.openDate ? new Date(pos.openDate).toLocaleDateString('en-GB') : 'غير متاح';
+                    // ^^^ --- نهاية الإصلاح --- ^^^
+                    msg += `\n├─ 🛒 *متوسط الشراء:* \`${avgBuyPriceText}\``;
+                    msg += `\n├─ 📦 *الكمية المشتراة:* \`${totalAmountText}\``;
+                    msg += `\n╰─ 🗓️ *تاريخ الفتح:* \`${openDateText}\``;
                 }
                 await ctx.editMessageText(msg, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة للإعدادات", "back_to_settings") });
             }
@@ -484,11 +491,11 @@ async function startBot() {
         app.use(express.json());
         app.use(webhookCallback(bot, "express"));
         app.listen(PORT, () => {
-            console.log(`Bot v47 (Error Handling Fix) listening on port ${PORT}`);
+            console.log(`Bot v48 (Crash-Proof Fix) listening on port ${PORT}`);
         });
     } else {
         bot.start();
-        console.log("Bot v47 (Error Handling Fix) started with polling.");
+        console.log("Bot v48 (Crash-Proof Fix) started with polling.");
     }
 
     // Set interval timers for recurring tasks
