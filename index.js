@@ -1,7 +1,7 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v39 (Accurate 7-Day Range)
+// OKX Advanced Analytics Bot - v39.1 (Robust 24h Change Calculation)
 // =================================================================
-// This version provides an accurate 7-day high/low in the coin info feature.
+// This version manually calculates the 24h change for accuracy.
 // =================================================================
 
 const express = require("express");
@@ -47,41 +47,41 @@ const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
 // === Helper & API Functions ===
 async function sendDebugMessage(message) { const settings = await loadSettings(); if (settings.debugMode) { try { await bot.api.sendMessage(AUTHORIZED_USER_ID, `🐞 *Debug:* ${message}`, { parse_mode: "Markdown" }); } catch (e) { console.error("Failed to send debug message:", e); } } }
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
-async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices:", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => { prices[t.instId] = { price: parseFloat(t.last), change24h: parseFloat(t.chg24h) || 0 }; }); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error); return null; } }
-async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const price = priceData.price; const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price: price, value: value, amount: amount, change24h: priceData.change24h }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
-async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
 
-async function getInstrumentDetails(instId) {
+// vvv --- الدالة التي تم إصلاحها --- vvv
+async function getMarketPrices() {
     try {
-        const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`);
-        const tickerJson = await tickerRes.json();
-        if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` };
-        const tickerData = tickerJson.data[0];
-
-        const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1D&limit=7`);
-        const candleJson = await candleRes.json();
-        let weeklyData = { high: 0, low: 0 };
-        if (candleJson.code === '0' && candleJson.data.length > 0) {
-            const highs = candleJson.data.map(c => parseFloat(c[2]));
-            const lows = candleJson.data.map(c => parseFloat(c[3]));
-            weeklyData.high = Math.max(...highs);
-            weeklyData.low = Math.min(...lows);
+        const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
+        const tickersJson = await tickersRes.json();
+        if (tickersJson.code !== '0') {
+            console.error("Failed to fetch market prices:", tickersJson.msg);
+            return null;
         }
-
-        return {
-            price: parseFloat(tickerData.last),
-            high24h: parseFloat(tickerData.high24h),
-            low24h: parseFloat(tickerData.low24h),
-            vol24h: parseFloat(tickerData.volCcy24h),
-            open24h: parseFloat(tickerData.open24h),
-            weeklyHigh: weeklyData.high,
-            weeklyLow: weeklyData.low
-        };
-    } catch (e) {
-        console.error(e);
-        return { error: "خطأ في الاتصال بالمنصة." };
+        const prices = {};
+        tickersJson.data.forEach(t => {
+            const lastPrice = parseFloat(t.last);
+            const openPrice = parseFloat(t.open24h);
+            let change24h = 0;
+            if (openPrice > 0) {
+                change24h = (lastPrice - openPrice) / openPrice;
+            }
+            prices[t.instId] = {
+                price: lastPrice,
+                open24h: openPrice,
+                change24h: change24h 
+            };
+        });
+        return prices;
+    } catch (error) {
+        console.error("Exception in getMarketPrices:", error);
+        return null;
     }
 }
+// ^^^ --- نهاية الدالة التي تم إصلاحها --- ^^^
+
+async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` }; let assets = [], total = 0; json.data[0]?.details?.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const price = priceData.price; const value = amount * price; if (value >= 1) { assets.push({ asset: asset.ccy, price: price, value: value, amount: amount, change24h: priceData.change24h }); } total += value; } }); const filteredAssets = assets.filter(a => a.value >= 1); filteredAssets.sort((a, b) => b.value - a.value); return { assets: filteredAssets, total }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > 1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
+async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; const candleRes = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId.toUpperCase()}&bar=1D&limit=7`); const candleJson = await candleRes.json(); let weeklyData = { high: 0, low: 0 }; if (candleJson.code === '0' && candleJson.data.length > 0) { const highs = candleJson.data.map(c => parseFloat(c[2])); const lows = candleJson.data.map(c => parseFloat(c[3])); weeklyData.high = Math.max(...highs); weeklyData.low = Math.min(...lows); } return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), open24h: parseFloat(tickerData.open24h), weeklyHigh: weeklyData.high, weeklyLow: weeklyData.low }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 function createChartUrl(history, periodLabel) { if (history.length < 2) return null; const labels = history.map(h => h.label); const data = history.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: 'rgba(75, 192, 192, 0.2)', borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] }, options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values[0]; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
 
@@ -308,11 +308,6 @@ bot.on("callback_query:data", async (ctx) => {
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (ctx.message.text && ctx.message.text.startsWith('/')) {
-        const command = ctx.message.text.split(' ')[0].slice(1).toLowerCase();
-        const knownCommands = ['start', 'settings', 'pnl', 'avg', 'unlocks'];
-        if (!knownCommands.includes(command)){
-             await ctx.reply("لم أتعرف على هذا الأمر.");
-        }
         return; 
     }
     
