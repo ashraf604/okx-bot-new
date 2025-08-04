@@ -1,9 +1,9 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v49 (Stable & Complete)
+// OKX Advanced Analytics Bot - v50 (Polished & Professional UX)
 // =================================================================
-// This version RE-INTEGRATES the missing "Price Movement Alerts" feature
-// and implements DEFENSIVE coding across the entire script to prevent
-// all 'toFixed' related crashes, ensuring bot stability.
+// This version focuses on enhancing the user experience by refining all
+// user-facing messages for clarity, professionalism, and consistency.
+// No logic changes, only text and presentation improvements.
 // =================================================================
 
 const express = require("express");
@@ -23,7 +23,7 @@ const API_BASE_URL = "https://www.okx.com";
 // --- State Variables ---
 let waitingState = null;
 
-// === Database Functions (Includes Re-added Functions) ===
+// === Database Functions ===
 const getCollection = (collectionName) => getDB().collection("configs");
 async function getConfig(id, defaultValue = {}) { const doc = await getCollection("configs").findOne({ _id: id }); return doc ? doc.data : defaultValue; }
 async function saveConfig(id, data) { await getCollection("configs").updateOne({ _id: id }, { $set: { data: data } }, { upsert: true }); }
@@ -41,12 +41,10 @@ const loadBalanceState = () => getConfig("balanceState", {});
 const saveBalanceState = (state) => saveConfig("balanceState", state);
 const loadAlerts = () => getConfig("priceAlerts", []);
 const saveAlerts = (alerts) => saveConfig("priceAlerts", alerts);
-// vvv --- Re-added Features --- vvv
 const loadAlertSettings = () => getConfig("alertSettings", { global: 5, overrides: {} });
 const saveAlertSettings = (settings) => saveConfig("alertSettings", settings);
 const loadPriceTracker = () => getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
 const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
-// ^^^ --- End of Re-added Features --- ^^^
 
 // === Helper & API Functions ===
 async function sendDebugMessage(message) { const settings = await loadSettings(); if (settings.debugMode) { try { await bot.api.sendMessage(AUTHORIZED_USER_ID, `🐞 *Debug:* ${message}`, { parse_mode: "Markdown" }); } catch (e) { console.error("Failed to send debug message:", e); } } }
@@ -94,9 +92,9 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
                     efficiencyText = `\n   - *كفاءة الخروج:* لقد حققت **${(exitEfficiency || 0).toFixed(1)}%** من أقصى ربح ممكن.`;
                 }
             }
-            retrospectiveReport = `✅ **تم إغلاق مركز ${asset}**\n\n` + `*النتيجة النهائية:* ${pnlEmoji} ربح \`${finalPnl >= 0 ? '+' : ''}${(finalPnl || 0).toFixed(2)}\` (\`${finalPnl >= 0 ? '+' : ''}${(finalPnlPercent || 0).toFixed(2)}%\`)\n\n` + `**تحليل الأداء:**\n` + `   - *متوسط الشراء:* \`$${(position.avgBuyPrice || 0).toFixed(4)}\`\n` + `   - *متوسط البيع:* \`$${(avgSellPrice || 0).toFixed(4)}\`\n` + `   - *أعلى سعر خلال الاحتفاظ:* \`$${(peakPrice || 0).toFixed(4)}\`` + efficiencyText;
+            retrospectiveReport = `✅ **تقرير إغلاق مركز: ${asset}**\n\n` + `*النتيجة النهائية للصفقة:* ${pnlEmoji} \`${finalPnl >= 0 ? '+' : ''}${(finalPnl || 0).toFixed(2)}$\` (\`${finalPnl >= 0 ? '+' : ''}${(finalPnlPercent || 0).toFixed(2)}%\`)\n\n` + `**ملخص تحليل الأداء:**\n` + `   - *متوسط سعر الشراء:* \`$${(position.avgBuyPrice || 0).toFixed(4)}\`\n` + `   - *متوسط سعر البيع:* \`$${(avgSellPrice || 0).toFixed(4)}\`\n` + `   - *أعلى سعر خلال فترة التملك:* \`$${(peakPrice || 0).toFixed(4)}\`` + efficiencyText;
             delete positions[asset];
-        } else { // Partial Sell
+        } else {
             await sendDebugMessage(`Partial sell for ${asset} recorded.`);
         }
     }
@@ -104,11 +102,11 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
     return retrospectiveReport;
 }
 
-// vvv --- Defensive Coding Applied --- vvv
+// vvv --- Refined Message Texts --- vvv
 async function formatPortfolioMsg(assets, total, capital) {
     const history = await loadHistory();
     const positions = await loadPositions();
-    let dailyPnlText = "   📈 *الربح/الخسارة (يومي):* `لا توجد بيانات كافية`\n";
+    let dailyPnlText = "   ▫️ *أداء (24س):* `لا توجد بيانات كافية`\n";
     if (history.length > 0) {
         const todayStr = new Date().toISOString().slice(0, 10);
         const previousDayRecord = history.filter(h => h.date !== todayStr).pop();
@@ -117,7 +115,7 @@ async function formatPortfolioMsg(assets, total, capital) {
             const dailyPnlPercent = previousDayRecord.total > 0 ? (dailyPnl / previousDayRecord.total) * 100 : 0;
             const dailyPnlEmoji = dailyPnl >= 0 ? '🟢' : '🔴';
             const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
-            dailyPnlText = `   📈 *الربح/الخسارة (يومي):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\` (\`${dailyPnlSign}${(dailyPnlPercent || 0).toFixed(2)}%\`)\n`;
+            dailyPnlText = `   ▫️ *أداء (24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\` (\`${dailyPnlSign}${(dailyPnlPercent || 0).toFixed(2)}%\`)\n`;
         }
     }
     let pnl = capital > 0 ? total - capital : 0;
@@ -128,32 +126,32 @@ async function formatPortfolioMsg(assets, total, capital) {
     const usdtValue = usdtAsset ? usdtAsset.value : 0;
     const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0;
     const investedPercent = 100 - cashPercent;
-    const liquidityText = `   - *السيولة:* 💵 الكاش ${(cashPercent || 0).toFixed(1)}% / 📈 المستثمر ${(investedPercent || 0).toFixed(1)}%`;
-    let msg = `🧾 *ملخص المحفظة التحليلي*\n\n`;
-    msg += `*آخر تحديث للأسعار: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
+    const liquidityText = `   ▫️ *توزيع السيولة:* 💵 نقدي ${(cashPercent || 0).toFixed(1)}% / 📈 مستثمر ${(investedPercent || 0).toFixed(1)}%`;
+    let msg = `🧾 *التقرير التحليلي للمحفظة*\n\n`;
+    msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
     msg += `━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `📊 *الأداء العام:*\n`;
-    msg += `   💰 *القيمة الحالية:* \`$${(total || 0).toFixed(2)}\`\n`;
-    msg += `   💼 *رأس المال:* \`$${(capital || 0).toFixed(2)}\`\n`;
-    msg += `   📉 *ربح إجمالي غير محقق:* ${pnlEmoji} \`${pnlSign}${(pnl || 0).toFixed(2)}\` (\`${pnlSign}${(pnlPercent || 0).toFixed(2)}%\`)\n`;
+    msg += `📊 *نظرة عامة على الأداء:*\n`;
+    msg += `   ▫️ *القيمة الإجمالية:* \`$${(total || 0).toFixed(2)}\`\n`;
+    msg += `   ▫️ *رأس المال المسجل:* \`$${(capital || 0).toFixed(2)}\`\n`;
+    msg += `   ▫️ *إجمالي الربح غير المحقق:* ${pnlEmoji} \`${pnlSign}${(pnl || 0).toFixed(2)}\` (\`${pnlSign}${(pnlPercent || 0).toFixed(2)}%\`)\n`;
     msg += dailyPnlText;
     msg += liquidityText + `\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `💎 *الأصــــــــول:*\n`;
+    msg += `💎 *مكونات المحفظة:*\n`;
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
         msg += "\n";
         if (a.asset === "USDT") {
-            msg += `*USDT* 💵\n`;
-            msg += `*الرصيد:* \`$${(a.value || 0).toFixed(2)}\` (\`${(percent || 0).toFixed(2)}%\`)`;
+            msg += `*USDT* (الرصيد النقدي) 💵\n`;
+            msg += `*القيمة:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)`;
         } else {
             const change24hPercent = (a.change24h || 0) * 100;
             const changeEmoji = change24hPercent >= 0 ? '🟢' : '🔴';
             const changeSign = change24hPercent >= 0 ? '+' : '';
-            msg += `╭─ *${a.asset}*\n`;
-            msg += `├─ 💰 *القيمة:* \`$${(a.value || 0).toFixed(2)}\` (\`${(percent || 0).toFixed(2)}%\`)\n`;
-            msg += `├─ 📈 *السعر الحالي:* \`$${(a.price || 0).toFixed(4)}\`\n`;
-            msg += `├─ ⏱️ *تغير (24س):* ${changeEmoji} \`${changeSign}${(change24hPercent || 0).toFixed(2)}%\`\n`;
+            msg += `╭─ *${a.asset}/USDT*\n`;
+            msg += `├─ *القيمة الحالية:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)\n`;
+            msg += `├─ *سعر السوق:* \`$${(a.price || 0).toFixed(4)}\`\n`;
+            msg += `├─ *تغير (24س):* ${changeEmoji} \`${changeSign}${(change24hPercent || 0).toFixed(2)}%\`\n`;
             const position = positions[a.asset];
             if (position && position.avgBuyPrice > 0) {
                 const avgBuyPrice = position.avgBuyPrice;
@@ -162,10 +160,10 @@ async function formatPortfolioMsg(assets, total, capital) {
                 const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0;
                 const assetPnlEmoji = assetPnl >= 0 ? '🟢' : '🔴';
                 const assetPnlSign = assetPnl >= 0 ? '+' : '';
-                msg += `├─ 🛒 *متوسط الشراء:* \`$${(avgBuyPrice || 0).toFixed(4)}\`\n`;
-                msg += `╰─ 📉 *ربح غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${(assetPnl || 0).toFixed(2)}\` (\`${assetPnlSign}${(assetPnlPercent || 0).toFixed(2)}%\`)`;
+                msg += `├─ *متوسط الشراء:* \`$${(avgBuyPrice || 0).toFixed(4)}\`\n`;
+                msg += `╰─ *ربح/خسارة غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${(assetPnl || 0).toFixed(2)}\` (\`${assetPnlSign}${(assetPnlPercent || 0).toFixed(2)}%\`)`;
             } else {
-                msg += `╰─ 🛒 *متوسط الشراء:* لم يتم تسجيله`;
+                msg += `╰─ *متوسط الشراء:* \`غير مسجل\``;
             }
         }
         if (index < assets.length - 1) {
@@ -174,7 +172,7 @@ async function formatPortfolioMsg(assets, total, capital) {
     });
     return msg;
 }
-// ^^^ End of Defensive Coding ^^^
+// ^^^ End of Refined Message Texts ^^^
 
 async function monitorBalanceChanges() {
     try {
@@ -225,20 +223,20 @@ async function monitorBalanceChanges() {
             let callbackData = "";
             const newAssetValue = currAmount * price;
             const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
-            const timestamp = `*آخر تحديث: ${new Date().toLocaleDateString("en-GB").replace(/\//g,'.')}*`;
+            const timestamp = `*بتاريخ: ${new Date().toLocaleDateString("en-GB").replace(/\//g,'.')}*`;
 
             if (type === 'شراء') {
                 const entryOfPortfolio = previousTotalPortfolioValue > 0 ? (tradeValue / previousTotalPortfolioValue) * 100 : 0;
                 const previousUSDTBalance = previousBalanceState['USDT'] || 0;
                 const entryOfCash = previousUSDTBalance > 0 ? (tradeValue / previousUSDTBalance) * 100 : 0;
-                publicRecommendationText = `🔔 **توصية تداول جديدة | شراء** 🟢\n\n` + `🔸 **العملة:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الصفقة:**\n` + `   💰 *متوسط السعر:* \`$${(price || 0).toFixed(4)}\`\n` + `   📦 *حجم الدخول:* \`${(entryOfPortfolio || 0).toFixed(2)}%\`\n\n` + `📊 **تأثيرها على المحفظة:**\n` + `   💵 *استهلاك الكاش:* \`${(entryOfCash || 0).toFixed(2)}%\`\n` + `   📈 *الوزن الجديد للعملة:* \`${(portfolioPercentage || 0).toFixed(2)}%\`\n\n${timestamp}`;
+                publicRecommendationText = `🔔 **توصية: شراء** 🟢\n\n` + `🔸 **الأصل:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الدخول:**\n` + `   ▫️ *متوسط سعر الشراء:* \`$${(price || 0).toFixed(4)}\`\n` + `   ▫️ *حجم الدخول من المحفظة:* \`${(entryOfPortfolio || 0).toFixed(2)}%\`\n\n` + `📊 **التأثير على المحفظة:**\n` + `   ▫️ *نسبة استهلاك الكاش:* \`${(entryOfCash || 0).toFixed(2)}%\`\n` + `   ▫️ *الوزن الجديد للعملة:* \`${(portfolioPercentage || 0).toFixed(2)}%\`\n\n${timestamp}`;
                 callbackData = `publish_buy_${asset}_${(price || 0).toFixed(4)}_${(entryOfPortfolio || 0).toFixed(2)}_${(entryOfCash || 0).toFixed(2)}_${(portfolioPercentage || 0).toFixed(2)}`;
             } else { // Sell
                 if (currAmount < 0.0001) { // Full close
-                    publicRecommendationText = `🔔 **توصية تداول جديدة | إغلاق مركز** 🔴\n\n` + `🔸 **العملة:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الصفقة:**\n` + `   💰 *متوسط سعر البيع:* \`$${(price || 0).toFixed(4)}\`\n` + `   ✅ *النتيجة:* تم إغلاق المركز بالكامل.\n\n` + `📊 **التأثير على المحفظة:**\n` + `   💵 *تم استعادة:* \`$${(tradeValue || 0).toFixed(2)}\` إلى الكاش.\n` + `   📈 *الوزن الجديد للعملة:* \`0.00%\`\n\n${timestamp}`;
+                    publicRecommendationText = `🔔 **توصية: إغلاق مركز** 🔴\n\n` + `🔸 **الأصل:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الخروج:**\n` + `   ▫️ *متوسط سعر البيع:* \`$${(price || 0).toFixed(4)}\`\n` + `   ▫️ *النتيجة:* تم إغلاق المركز بالكامل وتسييل قيمته.\n\n` + `📊 **التأثير على المحفظة:**\n` + `   ▫️ *القيمة المستعادة للكاش:* \`$${(tradeValue || 0).toFixed(2)}\`\n` + `   ▫️ *الوزن الجديد للعملة:* \`0.00%\`\n\n${timestamp}`;
                     callbackData = `publish_close_${asset}_${(price || 0).toFixed(4)}_${(tradeValue || 0).toFixed(2)}`;
                 } else { // Partial sell
-                     publicRecommendationText = `🔔 **تحديث توصية | تخفيف** 🟠\n\n` + `🔸 **العملة:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الصفقة:**\n` + `   💰 *متوسط سعر البيع:* \`$${(price || 0).toFixed(4)}\`\n` + `   📉 *تم بيع:* جزء من الكمية\n\n` + `📊 **التأثير على المحفظة:**\n` + `   📈 *الوزن الجديد للعملة:* \`${(portfolioPercentage || 0).toFixed(2)}%\`\n\n${timestamp}`;
+                     publicRecommendationText = `🔔 **توصية: تخفيف / جني ربح جزئي** 🟠\n\n` + `🔸 **الأصل:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل التخفيف:**\n` + `   ▫️ *متوسط سعر البيع:* \`$${(price || 0).toFixed(4)}\`\n` + `   ▫️ *النتيجة:* تم بيع جزء من الكمية.\n\n` + `📊 **التأثير على المحفظة:**\n` + `   ▫️ *الوزن الجديد للعملة:* \`${(portfolioPercentage || 0).toFixed(2)}%\`\n\n${timestamp}`;
                      callbackData = `publish_sell_${asset}_${(price || 0).toFixed(4)}_${(portfolioPercentage || 0).toFixed(2)}`;
                 }
             }
@@ -246,8 +244,8 @@ async function monitorBalanceChanges() {
             if (settings.autoPostToChannel && publicRecommendationText) {
                 await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
             } else if (publicRecommendationText) {
-                const confirmationKeyboard = new InlineKeyboard().text("✅ نشر في القناة", callbackData).text("❌ تجاهل", "ignore_trade");
-                await bot.api.sendMessage(AUTHORIZED_USER_ID, `*هل تريد نشر التوصية التالية في القناة؟*\n\n${publicRecommendationText}`, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
+                const confirmationKeyboard = new InlineKeyboard().text("✅ تأكيد ونشر في القناة", callbackData).text("❌ تجاهل الصفقة", "ignore_trade");
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, `*تم اكتشاف صفقة جديدة، هل تود نشر التوصية التالية في القناة؟*\n\n${publicRecommendationText}`, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
             }
             
             await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
@@ -262,7 +260,7 @@ async function monitorBalanceChanges() {
     }
 }
 
-async function checkPriceAlerts() { try { const alerts = await loadAlerts(); if (alerts.length === 0) return; const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = (prices[alert.instId] || {}).price; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر!* 🚨\n\n- العملة: *${alert.instId}*\n- الشرط: تحقق (${alert.condition} ${alert.price})\n- السعر الحالي: *${currentPrice}*`; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { await saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
+async function checkPriceAlerts() { try { const alerts = await loadAlerts(); if (alerts.length === 0) return; const prices = await getMarketPrices(); if (!prices) return; const remainingAlerts = []; let alertsTriggered = false; for (const alert of alerts) { const currentPrice = (prices[alert.instId] || {}).price; if (currentPrice === undefined) { remainingAlerts.push(alert); continue; } let triggered = false; if (alert.condition === '>' && currentPrice > alert.price) triggered = true; else if (alert.condition === '<' && currentPrice < alert.price) triggered = true; if (triggered) { const message = `🚨 *تنبيه سعر محدد!* 🚨\n\n- *العملة:* \`${alert.instId}\`\n- *الشرط:* تحقق (${alert.condition} ${alert.price})\n- *السعر الحالي:* \`${currentPrice}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); alertsTriggered = true; } else { remainingAlerts.push(alert); } } if (alertsTriggered) { await saveAlerts(remainingAlerts); } } catch (error) { console.error("Error in checkPriceAlerts:", error); } }
 
 async function runDailyJobs() {
     try {
@@ -284,7 +282,6 @@ async function runDailyJobs() {
     } catch(e) { console.error("CRITICAL ERROR in runDailyJobs:", e); }
 }
 
-// vvv --- Re-added Feature: Price Movement Alerts --- vvv
 async function checkPriceMovements() {
     try {
         await sendDebugMessage("بدء دورة التحقق من حركة الأسعار...");
@@ -311,7 +308,7 @@ async function checkPriceMovements() {
             if (Math.abs(changePercent) >= alertSettings.global) {
                 const emoji = changePercent > 0 ? '🟢' : '🔴';
                 const movementText = changePercent > 0 ? 'صعود' : 'هبوط';
-                const message = `📊 *تنبيه حركة المحفظة!*\n\n*الحركة:* ${emoji} *${movementText}* \`${(changePercent || 0).toFixed(2)}%\`\n*القيمة الحالية:* \`$${(currentTotalValue || 0).toFixed(2)}\``;
+                const message = `📊 *تنبيه حركة المحفظة الإجمالية!*\n\n*الحركة:* ${emoji} *${movementText}* بنسبة \`${(changePercent || 0).toFixed(2)}%\`\n*القيمة الحالية:* \`$${(currentTotalValue || 0).toFixed(2)}\``;
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
                 priceTracker.totalPortfolioValue = currentTotalValue;
                 trackerUpdated = true;
@@ -328,7 +325,7 @@ async function checkPriceMovements() {
                 if (Math.abs(changePercent) >= threshold) {
                     const emoji = changePercent > 0 ? '🟢' : '🔴';
                     const movementText = changePercent > 0 ? 'صعود' : 'هبوط';
-                    const message = `📈 *تنبيه حركة سعر!*\n\n*العملة:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* \`${(changePercent || 0).toFixed(2)}%\`\n*السعر الحالي:* \`$${(currentPrice || 0).toFixed(4)}\``;
+                    const message = `📈 *تنبيه حركة سعر لأصل محدد!*\n\n*الأصل:* \`${asset.asset}\`\n*الحركة:* ${emoji} *${movementText}* بنسبة \`${(changePercent || 0).toFixed(2)}%\`\n*السعر الحالي:* \`$${(currentPrice || 0).toFixed(4)}\``;
                     await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
                     priceTracker.assets[asset.asset] = currentPrice;
                     trackerUpdated = true;
@@ -349,7 +346,6 @@ async function checkPriceMovements() {
         console.error("CRITICAL ERROR in checkPriceMovements:", e);
     }
 }
-// ^^^ End of Re-added Feature ^^^
 
 
 const mainKeyboard = new Keyboard()
@@ -358,13 +354,13 @@ const mainKeyboard = new Keyboard()
     .text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").resized();
     
-async function sendSettingsMenu(ctx) { const settings = await loadSettings(); const settingsKeyboard = new InlineKeyboard().text("💰 تعيين رأس المال", "set_capital").text("💼 عرض المراكز", "view_positions").row().text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").text("🗑️ حذف تنبيه سعر", "delete_alert").row().text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row().text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row().text("🔥 حذف كل البيانات 🔥", "delete_all_data"); const text = "⚙️ *لوحة التحكم والإعدادات الرئيسية*"; try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } }
-async function sendMovementAlertsMenu(ctx) { const alertSettings = await loadAlertSettings(); const text = `🚨 *إدارة تنبيهات الحركة*\n\n- النسبة العامة الحالية: \`${alertSettings.global}%\`\n- يمكنك تعيين نسبة مختلفة لعملة معينة.`; const keyboard = new InlineKeyboard() .text("📊 تعديل النسبة العامة", "set_global_alert").row() .text("💎 تعديل نسبة عملة", "set_coin_alert").row() .text("📄 عرض كل الإعدادات", "view_movement_alerts").row() .text("🔙 العودة للإعدادات الرئيسية", "back_to_settings"); try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard }); } }
+async function sendSettingsMenu(ctx) { const settings = await loadSettings(); const settingsKeyboard = new InlineKeyboard().text("💰 تعيين رأس المال", "set_capital").text("💼 عرض المراكز المفتوحة", "view_positions").row().text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts").text("🗑️ حذف تنبيه سعر", "delete_alert").row().text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row().text(`🚀 النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row().text("🔥 حذف جميع بيانات البوت 🔥", "delete_all_data"); const text = "⚙️ *لوحة التحكم والإعدادات الرئيسية*"; try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard }); } }
+async function sendMovementAlertsMenu(ctx) { const alertSettings = await loadAlertSettings(); const text = `🚨 *إدارة تنبيهات حركة الأسعار*\n\nتستخدم هذه الإعدادات لمراقبة التغيرات المئوية في الأسعار وإعلامك.\n\n- *النسبة العامة الحالية:* سيتم تنبيهك لأي أصل يتحرك بنسبة \`${alertSettings.global}%\` أو أكثر.\n- يمكنك تعيين نسبة مختلفة لعملة معينة لتجاوز الإعداد العام.`; const keyboard = new InlineKeyboard() .text("📊 تعديل النسبة العامة", "set_global_alert").row() .text("💎 تعديل نسبة عملة محددة", "set_coin_alert").row() .text("📄 عرض الإعدادات الحالية", "view_movement_alerts").row() .text("🔙 العودة إلى الإعدادات", "back_to_settings"); try { await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard }); } catch { await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard }); } }
 
 bot.use(async (ctx, next) => { if (ctx.from?.id === AUTHORIZED_USER_ID) { await next(); } else { console.log(`Unauthorized access attempt by user ID: ${ctx.from?.id}`); } });
-bot.command("start", async (ctx) => { await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v49 - Stable & Complete*`, { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
+bot.command("start", async (ctx) => { await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v50 - Polished & Professional UX*\n\nأهلاً بك! أنا هنا لمساعدتك في تتبع وتحليل محفظتك الاستثمارية.`, { parse_mode: "Markdown", reply_markup: mainKeyboard }); });
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
-bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply(`❌ *صيغة غير صحيحة*\n\n` + `*يرجى استخدام الصيغة الصحيحة للأمر.*\n\n` + `*مثال:*\n\`/pnl <شراء> <بيع> <كمية>\``, { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن القيم أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const pnlSign = profitOrLoss >= 0 ? '+' : ''; const responseMessage = `🧮 *نتيجة حساب الربح والخسارة*\n\n` + `📝 **المدخلات:**\n` + `   - *سعر الشراء:* \`$${buyPrice.toLocaleString()}\`\n` + `   - *سعر البيع:* \`$${sellPrice.toLocaleString()}\`\n` + `   - *الكمية:* \`${quantity.toLocaleString()}\`\n\n` + `📊 **النتائج:**\n` + `   - *إجمالي الشراء:* \`$${totalInvestment.toLocaleString()}\`\n` + `   - *إجمالي البيع:* \`$${totalSaleValue.toLocaleString()}\`\n` + `   - *صافي الربح:* \`${pnlSign}${profitOrLoss.toLocaleString()}\` (\`${pnlSign}${(pnlPercentage || 0).toFixed(2)}%\`)\n\n` + `**${resultStatus}**`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
+bot.command("pnl", async (ctx) => { const args = ctx.match.trim().split(/\s+/); if (args.length !== 3 || args[0] === '') { return await ctx.reply(`❌ *صيغة غير صحيحة*\n\n` + `*يرجى استخدام الصيغة الصحيحة للأمر.*\n\n` + `*مثال:*\n\`/pnl <سعر الشراء> <سعر البيع> <الكمية>\``, { parse_mode: "Markdown" }); } const [buyPrice, sellPrice, quantity] = args.map(parseFloat); if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) { return await ctx.reply("❌ *خطأ:* تأكد من أن جميع القيم هي أرقام موجبة."); } const totalInvestment = buyPrice * quantity; const totalSaleValue = sellPrice * quantity; const profitOrLoss = totalSaleValue - totalInvestment; const pnlPercentage = (profitOrLoss / totalInvestment) * 100; const resultStatus = profitOrLoss >= 0 ? "ربح ✅" : "خسارة 🔻"; const pnlSign = profitOrLoss >= 0 ? '+' : ''; const responseMessage = `🧮 *نتيجة حساب الربح والخسارة*\n\n` + `📝 **المدخلات:**\n` + `   - *سعر الشراء:* \`$${buyPrice.toLocaleString()}\`\n` + `   - *سعر البيع:* \`$${sellPrice.toLocaleString()}\`\n` + `   - *الكمية:* \`${quantity.toLocaleString()}\`\n\n` + `📊 **النتائج:**\n` + `   - *إجمالي تكلفة الشراء:* \`$${totalInvestment.toLocaleString()}\`\n` + `   - *إجمالي قيمة البيع:* \`$${totalSaleValue.toLocaleString()}\`\n` + `   - *صافي الربح/الخسارة:* \`${pnlSign}${profitOrLoss.toLocaleString()}\` (\`${pnlSign}${(pnlPercentage || 0).toFixed(2)}%\`)\n\n` + `**الحالة النهائية: ${resultStatus}**`; await ctx.reply(responseMessage, { parse_mode: "Markdown" }); });
 
 bot.on("callback_query:data", async (ctx) => {
     try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Could not answer old callback query, ignoring. Error:", e.message); }
@@ -373,84 +369,84 @@ bot.on("callback_query:data", async (ctx) => {
 
     if (data.startsWith("chart_")) {
         const period = data.split('_')[1];
-        await ctx.editMessageText("⏳ جاري إنشاء التقرير...");
+        await ctx.editMessageText("⏳ جاري إنشاء تقرير الأداء...");
         let history, periodLabel, periodData;
         if (period === '24h') { history = await loadHourlyHistory(); periodLabel = "آخر 24 ساعة"; periodData = history.slice(-24); }
         else if (period === '7d') { history = await loadHistory(); periodLabel = "آخر 7 أيام"; periodData = history.slice(-7).map(h => ({ label: h.date.slice(5), total: h.total })); }
         else if (period === '30d') { history = await loadHistory(); periodLabel = "آخر 30 يومًا"; periodData = history.slice(-30).map(h => ({ label: h.date.slice(5), total: h.total })); }
         
-        if (!periodData || periodData.length < 2) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
+        if (!periodData || periodData.length < 2) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لإنشاء تقرير لهذه الفترة."); return; }
         const stats = calculatePerformanceStats(periodData);
-        if (!stats) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
+        if (!stats) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لإنشاء تقرير لهذه الفترة."); return; }
         const chartUrl = createChartUrl(periodData, periodLabel);
         const pnlEmoji = stats.pnl >= 0 ? '🟢' : '🔴';
         const pnlSign = stats.pnl >= 0 ? '+' : '';
-        const caption = `📊 *تحليل أداء المحفظة | ${periodLabel}*\n\n` + `📈 **النتيجة:** ${pnlEmoji} \`${pnlSign}${(stats.pnl || 0).toFixed(2)}\` (\`${pnlSign}${(stats.pnlPercent || 0).toFixed(2)}%\`)\n` + `*التغير الصافي: من \`$${(stats.startValue || 0).toFixed(2)}\` إلى \`$${(stats.endValue || 0).toFixed(2)}\`*\n\n` + `📝 **ملخص الفترة:**\n` + `   ⬆️ *أعلى قيمة:* \`$${(stats.maxValue || 0).toFixed(2)}\`\n` + `   ⬇️ *أدنى قيمة:* \`$${(stats.minValue || 0).toFixed(2)}\`\n` + `   📊 *متوسط القيمة:* \`$${(stats.avgValue || 0).toFixed(2)}\`\n\n`+ `*التقرير تم إنشاؤه في: ${new Date().toLocaleDateString("en-GB").replace(/\//g,'.')}*`;
-        try { await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" }); await ctx.deleteMessage(); } catch(e) { console.error("Failed to send chart:", e); await ctx.editMessageText("❌ فشل إنشاء الرسم البياني."); }
+        const caption = `📊 *تحليل أداء المحفظة | ${periodLabel}*\n\n` + `📈 **النتيجة:** ${pnlEmoji} \`${pnlSign}${(stats.pnl || 0).toFixed(2)}\` (\`${pnlSign}${(stats.pnlPercent || 0).toFixed(2)}%\`)\n` + `*التغير الصافي: من \`$${(stats.startValue || 0).toFixed(2)}\` إلى \`$${(stats.endValue || 0).toFixed(2)}\`*\n\n` + `📝 **ملخص إحصائيات الفترة:**\n` + `   ▫️ *أعلى قيمة وصلت لها المحفظة:* \`$${(stats.maxValue || 0).toFixed(2)}\`\n` + `   ▫️ *أدنى قيمة وصلت لها المحفظة:* \`$${(stats.minValue || 0).toFixed(2)}\`\n` + `   ▫️ *متوسط قيمة المحفظة:* \`$${(stats.avgValue || 0).toFixed(2)}\`\n\n`+ `*التقرير تم إنشاؤه في: ${new Date().toLocaleDateString("en-GB").replace(/\//g,'.')}*`;
+        try { await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" }); await ctx.deleteMessage(); } catch(e) { console.error("Failed to send chart:", e); await ctx.editMessageText("❌ فشل إنشاء الرسم البياني. قد تكون هناك مشكلة في خدمة الرسوم البيانية."); }
         return;
     }
     
     if (data.startsWith("publish_")) {
-        let finalRecommendation = ctx.callbackQuery.message.text.replace("*هل تريد نشر التوصية التالية في القناة؟*\n\n", "");
+        let finalRecommendation = ctx.callbackQuery.message.text.replace("*تم اكتشاف صفقة جديدة، هل تود نشر التوصية التالية في القناة؟*\n\n", "");
         try {
             await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, finalRecommendation, { parse_mode: "Markdown" });
-            await ctx.editMessageText("✅ تم النشر في القناة بنجاح.", { reply_markup: undefined });
+            await ctx.editMessageText("✅ تم نشر التوصية في القناة بنجاح.", { reply_markup: undefined });
         } catch (e) {
             console.error("Failed to post to channel:", e);
-            await ctx.editMessageText("❌ فشل النشر في القناة.", { reply_markup: undefined });
+            await ctx.editMessageText("❌ فشل النشر في القناة. تأكد من أن البوت لديه صلاحيات النشر في القناة المستهدفة.", { reply_markup: undefined });
         }
         return;
     }
     if (data === "ignore_trade") {
-        await ctx.editMessageText("❌ تم تجاهل الصفقة.", { reply_markup: undefined });
+        await ctx.editMessageText("❌ تم تجاهل الصفقة ولن يتم نشرها.", { reply_markup: undefined });
         return;
     }
 
     switch (data) {
         case "view_positions":
             const positions = await loadPositions();
-            if (Object.keys(positions).length === 0) { await ctx.editMessageText("ℹ️ لا توجد مراكز مفتوحة يتتبعها البوت حاليًا.", { reply_markup: new InlineKeyboard().text("🔙 العودة للإعدادات", "back_to_settings") }); } else {
-                let msg = "📄 *المراكز المفتوحة التي يتم تتبعها تلقائيًا:*\n";
+            if (Object.keys(positions).length === 0) { await ctx.editMessageText("ℹ️ لا توجد مراكز مفتوحة قيد التتبع حاليًا.", { reply_markup: new InlineKeyboard().text("🔙 العودة إلى الإعدادات", "back_to_settings") }); } else {
+                let msg = "📄 *قائمة المراكز المفتوحة التي يتم تتبعها تلقائيًا:*\n";
                 for (const symbol in positions) {
                     const pos = positions[symbol];
                     msg += `\n╭─ *${symbol}*`;
                     const avgBuyPriceText = pos && pos.avgBuyPrice ? `$${pos.avgBuyPrice.toFixed(4)}` : 'غير متاح';
                     const totalAmountText = pos && pos.totalAmountBought ? pos.totalAmountBought.toFixed(6) : 'غير متاح';
                     const openDateText = pos && pos.openDate ? new Date(pos.openDate).toLocaleDateString('en-GB') : 'غير متاح';
-                    msg += `\n├─ 🛒 *متوسط الشراء:* \`${avgBuyPriceText}\``;
-                    msg += `\n├─ 📦 *الكمية المشتراة:* \`${totalAmountText}\``;
-                    msg += `\n╰─ 🗓️ *تاريخ الفتح:* \`${openDateText}\``;
+                    msg += `\n├─ *متوسط الشراء:* \`${avgBuyPriceText}\``;
+                    msg += `\n├─ *الكمية الإجمالية المشتراة:* \`${totalAmountText}\``;
+                    msg += `\n╰─ *تاريخ فتح المركز:* \`${openDateText}\``;
                 }
-                await ctx.editMessageText(msg, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة للإعدادات", "back_to_settings") });
+                await ctx.editMessageText(msg, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة إلى الإعدادات", "back_to_settings") });
             }
             break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "manage_movement_alerts": await sendMovementAlertsMenu(ctx); break;
-        case "set_global_alert": waitingState = 'set_global_alert_state'; await ctx.editMessageText("✍️ أرسل النسبة المئوية العامة الجديدة (رقم فقط)."); break;
-        case "set_coin_alert": waitingState = 'set_coin_alert_state'; await ctx.editMessageText("✍️ أرسل رمز العملة والنسبة.\n*مثال:*\n`BTC 2.5`\n(للحذف أرسل نسبة 0)"); break;
+        case "set_global_alert": waitingState = 'set_global_alert_state'; await ctx.editMessageText("✍️ يرجى إرسال النسبة المئوية العامة الجديدة لتنبيهات الحركة (مثال: `5` لـ 5%)."); break;
+        case "set_coin_alert": waitingState = 'set_coin_alert_state'; await ctx.editMessageText("✍️ يرجى إرسال رمز العملة والنسبة المئوية المخصصة لها.\n*مثال لضبط تنبيه عند 2.5% لـ BTC:*\n`BTC 2.5`\n\n*لحذف الإعداد المخصص لعملة ما وإعادتها للنسبة العامة، أرسل نسبة 0.*"); break;
         case "view_movement_alerts":
             const alertSettings = await loadAlertSettings();
-            let msg_alerts = `🚨 *إعدادات تنبيهات الحركة:*\n\n` + `*النسبة العامة:* \`${alertSettings.global}%\`\n` + `--------------------\n*النسب المخصصة:*\n`;
-            if (Object.keys(alertSettings.overrides).length === 0) { msg_alerts += "لا توجد." } else { for (const coin in alertSettings.overrides) { msg_alerts += `- *${coin}:* \`${alertSettings.overrides[coin]}%\`\n`; } }
+            let msg_alerts = `🚨 *الإعدادات الحالية لتنبيهات الحركة:*\n\n` + `*النسبة العامة (Global):* \`${alertSettings.global}%\`\n` + `--------------------\n*النسب المخصصة (Overrides):*\n`;
+            if (Object.keys(alertSettings.overrides).length === 0) { msg_alerts += "لا توجد نسب مخصصة حاليًا." } else { for (const coin in alertSettings.overrides) { msg_alerts += `- *${coin}:* \`${alertSettings.overrides[coin]}%\`\n`; } }
             await ctx.editMessageText(msg_alerts, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة", "manage_movement_alerts") });
             break;
-        case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 أرسل المبلغ الجديد لرأس المال.", { reply_markup: undefined }); break;
+        case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط).", { reply_markup: undefined }); break;
         case "delete_alert":
             const alerts = await loadAlerts();
             if (alerts.length === 0) {
-                await ctx.editMessageText("ℹ️ لا توجد تنبيهات سعر مسجلة لحذفها.", { reply_markup: new InlineKeyboard().text("🔙 العودة للإعدادات", "back_to_settings") });
+                await ctx.editMessageText("ℹ️ لا توجد تنبيهات سعر محدد مسجلة حاليًا.", { reply_markup: new InlineKeyboard().text("🔙 العودة إلى الإعدادات", "back_to_settings") });
             } else {
-                let msg = "🗑️ *التنبيهات المسجلة:*\n\n";
+                let msg = "🗑️ *قائمة تنبيهات السعر المسجلة:*\n\n";
                 alerts.forEach((alert, index) => {
-                    msg += `*${index + 1}.* \`${alert.instId}\` ${alert.condition} \`${alert.price}\`\n`;
+                    msg += `*${index + 1}.* \`${alert.instId}\` عندما يكون السعر ${alert.condition === '>' ? 'أعلى من' : 'أقل من'} \`${alert.price}\`\n`;
                 });
-                msg += "\n*أرسل رقم التنبيه الذي تريد حذفه.*";
+                msg += "\n*يرجى إرسال رقم التنبيه الذي تود حذفه.*";
                 waitingState = 'delete_alert_number';
                 await ctx.editMessageText(msg, { parse_mode: "Markdown" });
             }
             break;
         case "toggle_summary": case "toggle_autopost": case "toggle_debug": { let settings = await loadSettings(); if (data === 'toggle_summary') settings.dailySummary = !settings.dailySummary; else if (data === 'toggle_autopost') settings.autoPostToChannel = !settings.autoPostToChannel; else if (data === 'toggle_debug') settings.debugMode = !settings.debugMode; await saveSettings(settings); await sendSettingsMenu(ctx); } break;
-        case "delete_all_data": waitingState = 'confirm_delete_all'; await ctx.editMessageText("⚠️ *هل أنت متأكد؟*\nأرسل `تأكيد الحذف` للمتابعة.", { parse_mode: "Markdown", reply_markup: undefined }); setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000); break;
+        case "delete_all_data": waitingState = 'confirm_delete_all'; await ctx.editMessageText("⚠️ *تحذير: هذا الإجراء لا يمكن التراجع عنه!* ⚠️\n\nسيتم حذف جميع بياناتك المخزنة، بما في ذلك رأس المال، المراكز، سجل الأداء، وجميع الإعدادات.\n\n*للمتابعة، أرسل كلمة: `تأكيد الحذف`*", { parse_mode: "Markdown", reply_markup: undefined }); setTimeout(() => { if (waitingState === 'confirm_delete_all') waitingState = null; }, 30000); break;
     }
 });
 
@@ -461,9 +457,9 @@ bot.on("message:text", async (ctx) => {
     // Main menu handlers
     switch(text) {
         case "📊 عرض المحفظة":
-            await ctx.reply("⏳ جاري جلب بيانات المحفظة...");
+            await ctx.reply("⏳ لحظات... جاري إعداد تقرير المحفظة.");
             const pricesPortfolio = await getMarketPrices();
-            if (!pricesPortfolio) { return await ctx.reply("❌ فشل في جلب أسعار السوق."); }
+            if (!pricesPortfolio) { return await ctx.reply("❌ عذرًا، فشل في جلب أسعار السوق. يرجى المحاولة مرة أخرى."); }
             const capital = await loadCapital();
             const { assets, total, error } = await getPortfolio(pricesPortfolio);
             if (error) { return await ctx.reply(`❌ ${error}`); }
@@ -472,21 +468,21 @@ bot.on("message:text", async (ctx) => {
             return;
         case "📈 أداء المحفظة":
             const performanceKeyboard = new InlineKeyboard().text("آخر 24 ساعة", "chart_24h").row().text("آخر 7 أيام", "chart_7d").row().text("آخر 30 يومًا", "chart_30d");
-            await ctx.reply("اختر الفترة الزمنية لعرض أداء المحفظة:", { reply_markup: performanceKeyboard });
+            await ctx.reply("اختر الفترة الزمنية المطلوبة لعرض تقرير الأداء:", { reply_markup: performanceKeyboard });
             return;
         case "ℹ️ معلومات عملة":
             waitingState = 'coin_info';
-            await ctx.reply("✍️ أرسل رمز العملة (مثال: `BTC-USDT`)");
+            await ctx.reply("✍️ يرجى إرسال رمز العملة (مثال: `BTC-USDT`).");
             return;
         case "⚙️ الإعدادات":
             await sendSettingsMenu(ctx);
             return;
         case "🔔 ضبط تنبيه":
             waitingState = 'set_alert';
-            await ctx.reply("✍️ *أرسل تنبيه السعر بالصيغة التالية:*\n`<رمز العملة> < > أو < > <السعر>`\n\n*أمثلة:*\n`BTC-USDT > 70000`\n`ETH-USDT < 3500`", { parse_mode: "Markdown" });
+            await ctx.reply("✍️ *لضبط تنبيه سعر محدد، أرسل البيانات بالصيغة التالية:*\n`<رمز العملة> < > أو < > <السعر>`\n\n*أمثلة:*\n`BTC-USDT > 70000`\n`ETH-USDT < 3500`", { parse_mode: "Markdown" });
             return;
         case "🧮 حاسبة الربح والخسارة":
-             await ctx.reply("✍️ لحساب الربح/الخسارة، استخدم أمر `/pnl`.\n\n*مثال:*\n`/pnl 50000 60000 0.5`", { parse_mode: "Markdown" });
+             await ctx.reply("✍️ لحساب الربح/الخسارة لصفقة افتراضية، استخدم أمر `/pnl`.\n\n*مثال:*\n`/pnl 50000 60000 0.5`", { parse_mode: "Markdown" });
              return;
     }
 
@@ -494,16 +490,16 @@ bot.on("message:text", async (ctx) => {
         const state = waitingState;
         waitingState = null;
         switch (state) {
-            case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { await saveCapital(amount); await ctx.reply(`✅ *تم تحديث رأس المال*\n\n💰 **المبلغ الجديد:** \`$${(amount || 0).toFixed(2)}\``, {parse_mode: "Markdown"}); } else { await ctx.reply("❌ مبلغ غير صالح."); } return;
-            case 'set_global_alert_state': const percent = parseFloat(text); if (isNaN(percent) || percent <= 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا موجبًا."); } let alertSettingsGlobal = await loadAlertSettings(); alertSettingsGlobal.global = percent; await saveAlertSettings(alertSettingsGlobal); await ctx.reply(`✅ تم تحديث النسبة العامة إلى \`${percent}%\`.`); return;
-            case 'set_coin_alert_state': const parts_coin_alert = text.split(/\s+/); if (parts_coin_alert.length !== 2) { return await ctx.reply("❌ *صيغة غير صحيحة*. يرجى إرسال رمز العملة ثم النسبة."); } const [symbol_coin_alert, percentStr_coin_alert] = parts_coin_alert; const coinPercent = parseFloat(percentStr_coin_alert); if (isNaN(coinPercent) || coinPercent < 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا."); } let alertSettingsCoin = await loadAlertSettings(); if (coinPercent === 0) { delete alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()]; await ctx.reply(`✅ تم حذف النسبة المخصصة لـ *${symbol_coin_alert.toUpperCase()}* وستتبع النسبة العامة.`); } else { alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()] = coinPercent; await ctx.reply(`✅ تم تحديث النسبة المخصصة لـ *${symbol_coin_alert.toUpperCase()}* إلى \`${coinPercent}%\`.`); } await saveAlertSettings(alertSettingsCoin); return;
+            case 'set_capital': const amount = parseFloat(text); if (!isNaN(amount) && amount >= 0) { await saveCapital(amount); await ctx.reply(`✅ *تم تحديث رأس المال بنجاح.*\n\n💰 **المبلغ الجديد:** \`$${(amount || 0).toFixed(2)}\``, {parse_mode: "Markdown"}); } else { await ctx.reply("❌ مبلغ غير صالح. يرجى إرسال رقم فقط."); } return;
+            case 'set_global_alert_state': const percent = parseFloat(text); if (isNaN(percent) || percent <= 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا موجبًا."); } let alertSettingsGlobal = await loadAlertSettings(); alertSettingsGlobal.global = percent; await saveAlertSettings(alertSettingsGlobal); await ctx.reply(`✅ تم تحديث النسبة العامة لتنبيهات الحركة إلى \`${percent}%\`.`); return;
+            case 'set_coin_alert_state': const parts_coin_alert = text.split(/\s+/); if (parts_coin_alert.length !== 2) { return await ctx.reply("❌ *صيغة غير صحيحة*. يرجى إرسال رمز العملة ثم النسبة."); } const [symbol_coin_alert, percentStr_coin_alert] = parts_coin_alert; const coinPercent = parseFloat(percentStr_coin_alert); if (isNaN(coinPercent) || coinPercent < 0) { return await ctx.reply("❌ *خطأ:* النسبة يجب أن تكون رقمًا."); } let alertSettingsCoin = await loadAlertSettings(); if (coinPercent === 0) { delete alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()]; await ctx.reply(`✅ تم حذف الإعداد المخصص لـ *${symbol_coin_alert.toUpperCase()}* وستتبع الآن النسبة العامة.`); } else { alertSettingsCoin.overrides[symbol_coin_alert.toUpperCase()] = coinPercent; await ctx.reply(`✅ تم تحديث النسبة المخصصة لـ *${symbol_coin_alert.toUpperCase()}* إلى \`${coinPercent}%\`.`); } await saveAlertSettings(alertSettingsCoin); return;
             case 'coin_info':
                 const instId = text.toUpperCase();
-                await ctx.reply(`⏳ جاري البحث عن معلومات ${instId}...`);
+                await ctx.reply(`⏳ جاري البحث عن بيانات ${instId}...`);
                 const details = await getInstrumentDetails(instId);
                 if (details.error) { return await ctx.reply(`❌ ${details.error}`); }
                 
-                let msg = `ℹ️ *معلومات عملة | ${instId}*\n\n` + `   💲 *السعر الحالي:* \`$${(details.price || 0).toFixed(4)}\`\n` + `   📈 *أعلى سعر (24س):* \`$${(details.high24h || 0).toFixed(4)}\`\n` + `   📉 *أدنى سعر (24س):* \`$${(details.low24h || 0).toFixed(4)}\`\n\n` + `   📅 *النطاق الأسبوعي (آخر 7 أيام):*\n` + `   ⬆️ *أعلى سعر:* \`$${(details.weeklyHigh || 0).toFixed(4)}\`\n` + `   ⬇️ *أدنى سعر:* \`$${(details.weeklyLow || 0).toFixed(4)}\`\n\n` + `   📊 *حجم التداول (24س):* \`$${(details.vol24h || 0).toLocaleString()}\`\n\n` + `*البيانات من منصة OKX*`;
+                let msg = `ℹ️ *تقرير بيانات السوق | ${instId}*\n\n` + `   ▫️ *السعر الحالي:* \`$${(details.price || 0).toFixed(4)}\`\n` + `   ▫️ *أعلى سعر (24س):* \`$${(details.high24h || 0).toFixed(4)}\`\n` + `   ▫️ *أدنى سعر (24س):* \`$${(details.low24h || 0).toFixed(4)}\`\n\n` + `   ▫️ *النطاق السعري الأسبوعي (آخر 7 أيام):*\n` + `     *الأعلى:* \`$${(details.weeklyHigh || 0).toFixed(4)}\` | *الأدنى:* \`$${(details.weeklyLow || 0).toFixed(4)}\`\n\n` + `   ▫️ *حجم التداول (24س):* \`$${(details.vol24h || 0).toLocaleString()}\`\n\n` + `*البيانات من منصة OKX*`;
                 
                 const prices = await getMarketPrices();
                 if (prices) {
@@ -526,34 +522,34 @@ bot.on("message:text", async (ctx) => {
                         const dailyPnlEmoji = dailyPnl >= 0 ? '🟢' : '🔴';
                         const dailyPnlSign = dailyPnl >= 0 ? '+' : '';
         
-                        msg += `\n\n━━━━━━━━━━━━━━━━━━━━\n` + `📊 *موقفك في العملة:*\n` + `   - *ربح إجمالي غير محقق:* ${totalPnlEmoji} \`${totalPnlSign}${(totalPnl || 0).toFixed(2)}\` (\`${totalPnlSign}${(totalPnlPercent || 0).toFixed(2)}%\`)\n` + `   - *الربح/الخسارة (آخر 24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\``;
+                        msg += `\n\n━━━━━━━━━━━━━━━━━━━━\n` + `📊 *تحليل مركزك في العملة:*\n` + `   ▫️ *الربح/الخسارة الإجمالي (غير محقق):* ${totalPnlEmoji} \`${totalPnlSign}${(totalPnl || 0).toFixed(2)}\` (\`${totalPnlSign}${(totalPnlPercent || 0).toFixed(2)}%\`)\n` + `   ▫️ *الربح/الخسارة (آخر 24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\``;
                     }
                 }
                 await ctx.reply(msg, { parse_mode: "Markdown" });
                 return;
             case 'set_alert':
-                const parts = text.trim().split(/\s+/);
-                if (parts.length !== 3) { return await ctx.reply("❌ صيغة غير صحيحة. يرجى استخدام الصيغة: `SYMBOL > PRICE`"); }
-                const [alertInstId, condition, priceStr] = parts;
+                const parts_alert = text.trim().split(/\s+/);
+                if (parts_alert.length !== 3) { return await ctx.reply("❌ صيغة غير صحيحة. يرجى استخدام الصيغة: `SYMBOL > PRICE`"); }
+                const [alertInstId, condition, priceStr] = parts_alert;
                 if (condition !== '>' && condition !== '<') { return await ctx.reply("❌ الشرط غير صالح. استخدم `>` أو `<` فقط."); }
                 const alertPrice = parseFloat(priceStr);
                 if (isNaN(alertPrice) || alertPrice <= 0) { return await ctx.reply("❌ السعر غير صالح."); }
                 const alertsList = await loadAlerts();
                 alertsList.push({ instId: alertInstId.toUpperCase(), condition: condition, price: alertPrice });
                 await saveAlerts(alertsList);
-                await ctx.reply(`✅ تم ضبط التنبيه:\n*${alertInstId.toUpperCase()}* سيتم تنبيهك إذا كان السعر ${condition} *${alertPrice}*`, { parse_mode: "Markdown" });
+                await ctx.reply(`✅ تم ضبط التنبيه بنجاح:\nسيتم إعلامك إذا أصبح سعر *${alertInstId.toUpperCase()}* ${condition === '>' ? 'أعلى من' : 'أقل من'} *${alertPrice}*`, { parse_mode: "Markdown" });
                 return;
             case 'delete_alert_number':
                 const alertIndex = parseInt(text) - 1;
                 let currentAlerts = await loadAlerts();
                 if (isNaN(alertIndex) || alertIndex < 0 || alertIndex >= currentAlerts.length) {
-                    return await ctx.reply("❌ رقم غير صالح. الرجاء الاختيار من القائمة.");
+                    return await ctx.reply("❌ رقم غير صالح. يرجى الاختيار من القائمة.");
                 }
                 const removedAlert = currentAlerts.splice(alertIndex, 1)[0];
                 await saveAlerts(currentAlerts);
                 await ctx.reply(`✅ تم حذف التنبيه بنجاح:\n\`${removedAlert.instId} ${removedAlert.condition} ${removedAlert.price}\``, { parse_mode: "Markdown" });
                 return;
-            case 'confirm_delete_all': if (text === 'تأكيد الحذف') { await getCollection("configs").deleteMany({}); await ctx.reply("✅ تم حذف جميع البيانات بنجاح."); } else { await ctx.reply("❌ تم إلغاء عملية الحذف."); } return;
+            case 'confirm_delete_all': if (text === 'تأكيد الحذف') { await getCollection("configs").deleteMany({}); await ctx.reply("✅ تم حذف جميع بياناتك المخزنة بنجاح. يمكنك البدء من جديد."); } else { await ctx.reply("❌ تم إلغاء عملية الحذف."); } return;
         }
     }
 });
@@ -567,11 +563,11 @@ async function startBot() {
         app.use(express.json());
         app.use(webhookCallback(bot, "express"));
         app.listen(PORT, () => {
-            console.log(`Bot v49 (Stable & Complete) listening on port ${PORT}`);
+            console.log(`Bot v50 (Polished & Professional UX) listening on port ${PORT}`);
         });
     } else {
         bot.start();
-        console.log("Bot v49 (Stable & Complete) started with polling.");
+        console.log("Bot v50 (Polished & Professional UX) started with polling.");
     }
 
     // Set interval timers for recurring tasks
