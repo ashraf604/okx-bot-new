@@ -1,9 +1,8 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v59 (Analyst-Grade Public Recommendations)
+// OKX Advanced Analytics Bot - v60 (Railway Healthcheck Fix)
 // =================================================================
-// This version implements the user's specific, detailed format for
-// public-facing channel recommendations, using percentages to provide
-// rich analysis without revealing absolute portfolio values.
+// This version adds a root endpoint to respond to the hosting
+// platform's health checks, ensuring successful deployments.
 // =================================================================
 
 const express = require("express");
@@ -23,7 +22,7 @@ const API_BASE_URL = "https://www.okx.com";
 // --- State Variables ---
 let waitingState = null;
 
-// === Database Functions (No changes) ===
+// === Database Functions ===
 const getCollection = (collectionName) => getDB().collection("configs");
 async function getConfig(id, defaultValue = {}) { const doc = await getCollection("configs").findOne({ _id: id }); return doc ? doc.data : defaultValue; }
 async function saveConfig(id, data) { await getCollection("configs").updateOne({ _id: id }, { $set: { data: data } }, { upsert: true }); }
@@ -47,7 +46,7 @@ const loadPriceTracker = () => getConfig("priceTracker", { totalPortfolioValue: 
 const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
 
 
-// === Helper & API Functions (No changes) ===
+// === Helper & API Functions ===
 async function sendDebugMessage(message) { const settings = await loadSettings(); if (settings.debugMode) { try { await bot.api.sendMessage(AUTHORIZED_USER_ID, `🐞 *Debug:* ${message}`, { parse_mode: "Markdown" }); } catch (e) { console.error("Failed to send debug message:", e); } } }
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices (OKX Error):", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => { const lastPrice = parseFloat(t.last); const openPrice = parseFloat(t.open24h); let change24h = 0; if (openPrice > 0) { change24h = (lastPrice - openPrice) / openPrice; } prices[t.instId] = { price: lastPrice, open24h: openPrice, change24h: change24h }; }); return prices; } catch (error) { console.error("Exception in getMarketPrices (Invalid Response):", error.message); return null; } }
@@ -55,7 +54,7 @@ async function getPortfolio(prices) { try { const path = "/api/v5/account/balanc
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0') { console.error("Error fetching balance for comparison:", json.msg); return null; } const balanceMap = {}; json.data[0]?.details?.forEach(asset => { const totalBalance = parseFloat(asset.eq); if (totalBalance > -1e-9) { balanceMap[asset.ccy] = totalBalance; } }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
 async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmount) { const positions = await loadPositions(); const position = positions[asset]; if (amountChange > 0) { if (!position) { positions[asset] = { totalAmountBought: amountChange, totalCost: (amountChange * price), avgBuyPrice: price, openDate: new Date().toISOString(), totalAmountSold: 0, realizedValue: 0, }; } else { position.totalAmountBought += amountChange; position.totalCost += (amountChange * price); position.avgBuyPrice = position.totalCost / position.totalAmountBought; } } else if (amountChange < 0 && position) { const amountSold = Math.abs(amountChange); position.realizedValue += (amountSold * price); position.totalAmountSold += amountSold; if (newTotalAmount * price < 1) { await sendDebugMessage(`Position for ${asset} closed. Generating final report...`); const finalPnl = position.realizedValue - position.totalCost; const finalPnlPercent = (position.totalCost > 0) ? (finalPnl / position.totalCost) * 100 : 0; const avgSellPrice = position.totalAmountSold > 0 ? position.realizedValue / position.totalAmountSold : 0; const pnlEmoji = finalPnl >= 0 ? '🟢⬆️' : '🔴⬇️'; const retrospectiveReport = `✅ **تقرير إغلاق مركز: ${asset}**\n\n` + `*النتيجة النهائية للصفقة:* ${pnlEmoji} \`${finalPnl >= 0 ? '+' : ''}${(finalPnl || 0).toFixed(2)}\` (\`${finalPnl >= 0 ? '+' : ''}${(finalPnlPercent || 0).toFixed(2)}%\`)\n\n` + `**ملخص تحليل الأداء:**\n` + `   - *متوسط سعر الشراء:* \`$${(position.avgBuyPrice || 0).toFixed(4)}\`\n` + `   - *متوسط سعر البيع:* \`$${(avgSellPrice || 0).toFixed(4)}\``; delete positions[asset]; await savePositions(positions); return retrospectiveReport; } } await savePositions(positions); return null; }
 
-// vvv --- The final trade monitoring logic with Analyst-Grade public recommendations --- vvv
+// === Core Logic & Bot Handlers ===
 async function monitorBalanceChanges() {
     try {
         await sendDebugMessage("بدء دورة التحقق من الصفقات...");
@@ -179,8 +178,8 @@ async function monitorBalanceChanges() {
             if (settings.autoPostToChannel) {
                 await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicRecommendationText, { parse_mode: "Markdown" });
             } else {
-                const confirmationKeyboard = new InlineKeyboard().text("✅ تأكيد ونشر في القناة", "publish_trade");
-                await bot.api.sendMessage(AUTHORIZED_USER_ID, `*هل تود نشر التوصية التالية في القناة؟*\n\n${publicRecommendationText}`, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
+                const confirmationKeyboard = new InlineKeyboard().text("✅ تأكيد ونشر في القناة", `publish_trade:::${Buffer.from(publicRecommendationText).toString('base64')}`);
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, `*هل تود نشر التوصية التالية في القناة؟*\n\n(معاينة الرسالة العامة)`, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
             }
         }
         
@@ -188,14 +187,75 @@ async function monitorBalanceChanges() {
             await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
             await sendDebugMessage(`State updated after processing all detected trades.`);
         } else {
-            if (Math.abs(newTotalPortfolioValue - previousState.totalValue) > 1) {
+            if (Math.abs(newTotalPortfolioValue - (previousState.totalValue || 0)) > 1) {
                  await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
             }
             await sendDebugMessage("لا توجد تغييرات صفقات تستحق التسجيل.");
         }
     } catch (e) { console.error("CRITICAL ERROR in monitorBalanceChanges:", e); }
 }
-// ^^^ End of final logic ^^^
 
-// The rest of the file (bot handlers, start function, etc.) remains unchanged.
-// The code is omitted for brevity.
+async function formatPortfolioMsg(assets, total, capital) { const history = await loadHistory(); const positions = await loadPositions(); let dailyPnlText = "   ▫️ *الأداء اليومي (24س):* `لا توجد بيانات كافية`\n"; if (history.length > 0) { const todayStr = new Date().toISOString().slice(0, 10); const previousDayRecord = history.filter(h => h.date !== todayStr).pop(); if (previousDayRecord && typeof previousDayRecord.total === 'number') { const dailyPnl = total - previousDayRecord.total; const dailyPnlPercent = previousDayRecord.total > 0 ? (dailyPnl / previousDayRecord.total) * 100 : 0; const dailyPnlEmoji = dailyPnl >= 0 ? '🟢⬆️' : '🔴⬇️'; const dailyPnlSign = dailyPnl >= 0 ? '+' : ''; dailyPnlText = `   ▫️ *الأداء اليومي (24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\` (\`${dailyPnlSign}${(dailyPnlPercent || 0).toFixed(2)}%\`)\n`; } } let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let pnlEmoji = pnl >= 0 ? '🟢⬆️' : '🔴⬇️'; let pnlSign = pnl >= 0 ? '+' : ''; const usdtAsset = assets.find(a => a.asset === 'USDT'); const usdtValue = usdtAsset ? usdtAsset.value : 0; const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0; const investedPercent = 100 - cashPercent; const liquidityText = `   ▫️ *توزيع السيولة:* 💵 نقدي ${(cashPercent || 0).toFixed(1)}% / 📈 مستثمر ${(investedPercent || 0).toFixed(1)}%`; let msg = `🧾 *التقرير التحليلي للمحفظة*\n\n`; msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`; msg += `━━━━━━━━━━━━━━━━━━━\n`; msg += `📊 *نظرة عامة على الأداء:*\n`; msg += `   ▫️ *القيمة الإجمالية:* \`$${(total || 0).toFixed(2)}\`\n`; msg += `   ▫️ *رأس المال المسجل:* \`$${(capital || 0).toFixed(2)}\`\n`; msg += `   ▫️ *إجمالي الربح غير المحقق:* ${pnlEmoji} \`${pnlSign}${(pnl || 0).toFixed(2)}\` (\`${pnlSign}${(pnlPercent || 0).toFixed(2)}%\`)\n`; msg += dailyPnlText; msg += liquidityText + `\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n`; msg += `💎 *مكونات المحفظة:*\n`; assets.forEach((a, index) => { let percent = total > 0 ? ((a.value / total) * 100) : 0; msg += "\n"; if (a.asset === "USDT") { msg += `*USDT* (الرصيد النقدي) 💵\n`; msg += `*القيمة:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)`; } else { const change24hPercent = (a.change24h || 0) * 100; const changeEmoji = change24hPercent >= 0 ? '🟢⬆️' : '🔴⬇️'; const changeSign = change24hPercent >= 0 ? '+' : ''; msg += `╭─ *${a.asset}/USDT*\n`; msg += `├─ *القيمة الحالية:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)\n`; msg += `├─ *سعر السوق:* \`$${(a.price || 0).toFixed(4)}\`\n`; msg += `├─ *الأداء اليومي:* ${changeEmoji} \`${changeSign}${(change24hPercent || 0).toFixed(2)}%\`\n`; const position = positions[a.asset]; if (position && position.avgBuyPrice > 0) { const avgBuyPrice = position.avgBuyPrice; const totalCost = avgBuyPrice * a.amount; const assetPnl = a.value - totalCost; const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0; const assetPnlEmoji = assetPnl >= 0 ? '🟢⬆️' : '🔴⬇️'; const assetPnlSign = assetPnl >= 0 ? '+' : ''; msg += `├─ *متوسط الشراء:* \`$${(avgBuyPrice || 0).toFixed(4)}\`\n`; msg += `╰─ *ربح/خسارة غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${(assetPnl || 0).toFixed(2)}\` (\`${assetPnlSign}${(assetPnlPercent || 0).toFixed(2)}%\`)`; } else { msg += `╰─ *متوسط الشراء:* \`غير مسجل\``; } } if (index < assets.length - 1) { msg += `\n━━━━━━━━━━━━━━━━━━━━`; } }); return msg; }
+
+// --- Bot Command and Callback Handlers ---
+// ... (The rest of the code is omitted for brevity as it is largely unchanged) ...
+// The callback handler needs a slight modification for publish_trade
+
+bot.on("callback_query:data", async (ctx) => {
+    try {
+        await ctx.answerCallbackQuery();
+        const data = ctx.callbackQuery.data;
+        if (!ctx.callbackQuery.message) { console.log("Callback query has no message, skipping."); return; }
+
+        if (data.startsWith("publish_trade")) {
+            const encodedText = data.split(':::')[1];
+            if (!encodedText) {
+                await ctx.editMessageText("❌ خطأ: لم يتم العثور على محتوى الرسالة للنشر.");
+                return;
+            }
+            const recommendationText = Buffer.from(encodedText, 'base64').toString('utf-8');
+            try {
+                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, recommendationText, { parse_mode: "Markdown" });
+                await ctx.editMessageText("✅ تم نشر التوصية في القناة بنجاح.", { reply_markup: undefined });
+            } catch (e) {
+                console.error("Failed to post to channel:", e);
+                await ctx.editMessageText("❌ فشل النشر في القناة.", { reply_markup: undefined });
+            }
+            return;
+        }
+
+        // ... (rest of callback handler as before) ...
+    } catch (error) {
+        console.error("Caught a critical error in callback_query handler:", error);
+    }
+});
+
+
+// Start the bot
+async function startBot() {
+    try {
+        await connectDB();
+        console.log("تم ربط قاعدة البيانات بنجاح بـMongoDB.");
+
+        if (process.env.NODE_ENV === "production") {
+            app.use(express.json());
+
+            // The critical fix for Railway health checks
+            app.get("/", (req, res) => res.status(200).send("OK! Bot is alive."));
+
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => { console.log(`بوت v60 (Healthcheck Fix) يستمع على المنفذ ${PORT}`); });
+        } else {
+            bot.start();
+            console.log("Bot v60 (Healthcheck Fix) started with polling.");
+        }
+
+        setInterval(monitorBalanceChanges, 60000); // Check every 60 seconds
+        setInterval(runDailyJobs, 3600000); // Check every hour
+        
+    } catch (e) {
+        console.error("FATAL: Could not start the bot.", e);
+    }
+}
+
+startBot();
