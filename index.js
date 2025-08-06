@@ -1,8 +1,9 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v60 (Railway Healthcheck Fix)
+// OKX Advanced Analytics Bot - v61 (Final Analyst-Grade Format)
 // =================================================================
-// This version adds a root endpoint to respond to the hosting
-// platform's health checks, ensuring successful deployments.
+// This version restores a missing key metric in the public 'buy'
+// recommendation ("Trade Size from Portfolio %"), completing the
+// final requested format for analyst-grade channel messages.
 // =================================================================
 
 const express = require("express");
@@ -94,7 +95,7 @@ async function monitorBalanceChanges() {
             
             const retrospectiveReport = await updatePositionAndAnalyze(asset, difference, price, currAmount);
 
-            // --- 1. Construct the Private, Detailed Analysis Message ---
+            // --- Common Metrics for Both Messages ---
             const tradeValue = Math.abs(difference) * price;
             const newAssetValue = currAmount * price;
             const newAssetWeight = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
@@ -108,6 +109,7 @@ async function monitorBalanceChanges() {
             if (difference > 0) { tradeTypeStr = "شراء 🟢⬆️"; } 
             else { tradeTypeStr = (newAssetValue < 1) ? "إغلاق مركز 🔴⬇️" : "بيع جزئي 🟠"; }
 
+            // --- 1. Construct the Private, Detailed Analysis Message ---
             const privateAnalysisText = `🔔 **تحليل حركة تداول (خاص)**\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `🔸 **العملية:** ${tradeTypeStr}\n` +
@@ -137,6 +139,7 @@ async function monitorBalanceChanges() {
                     `🔸 **متوسط سعر الدخول:** \`$${(price || 0).toFixed(4)}\`\n` +
                     `━━━━━━━━━━━━━━━━━━━━\n` +
                     `📊 **تحليل الصفقة:**\n` +
+                    `   ▫️ *حجم الدخول من المحفظة:* \`${tradeSizePercent.toFixed(2)}%\`\n` +
                     `   ▫️ *حجم الدخول من الكاش:* \`${entryOfCash.toFixed(2)}%\`\n` +
                     `   ▫️ *الوزن الجديد للعملة في المحفظة:* \`${newAssetWeight.toFixed(2)}%\`\n` +
                     `   ▫️ *نسبة الكاش المتبقية:* \`${newCashWeight.toFixed(2)}%\`\n` +
@@ -197,9 +200,12 @@ async function monitorBalanceChanges() {
 
 async function formatPortfolioMsg(assets, total, capital) { const history = await loadHistory(); const positions = await loadPositions(); let dailyPnlText = "   ▫️ *الأداء اليومي (24س):* `لا توجد بيانات كافية`\n"; if (history.length > 0) { const todayStr = new Date().toISOString().slice(0, 10); const previousDayRecord = history.filter(h => h.date !== todayStr).pop(); if (previousDayRecord && typeof previousDayRecord.total === 'number') { const dailyPnl = total - previousDayRecord.total; const dailyPnlPercent = previousDayRecord.total > 0 ? (dailyPnl / previousDayRecord.total) * 100 : 0; const dailyPnlEmoji = dailyPnl >= 0 ? '🟢⬆️' : '🔴⬇️'; const dailyPnlSign = dailyPnl >= 0 ? '+' : ''; dailyPnlText = `   ▫️ *الأداء اليومي (24س):* ${dailyPnlEmoji} \`${dailyPnlSign}${(dailyPnl || 0).toFixed(2)}\` (\`${dailyPnlSign}${(dailyPnlPercent || 0).toFixed(2)}%\`)\n`; } } let pnl = capital > 0 ? total - capital : 0; let pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0; let pnlEmoji = pnl >= 0 ? '🟢⬆️' : '🔴⬇️'; let pnlSign = pnl >= 0 ? '+' : ''; const usdtAsset = assets.find(a => a.asset === 'USDT'); const usdtValue = usdtAsset ? usdtAsset.value : 0; const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0; const investedPercent = 100 - cashPercent; const liquidityText = `   ▫️ *توزيع السيولة:* 💵 نقدي ${(cashPercent || 0).toFixed(1)}% / 📈 مستثمر ${(investedPercent || 0).toFixed(1)}%`; let msg = `🧾 *التقرير التحليلي للمحفظة*\n\n`; msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`; msg += `━━━━━━━━━━━━━━━━━━━\n`; msg += `📊 *نظرة عامة على الأداء:*\n`; msg += `   ▫️ *القيمة الإجمالية:* \`$${(total || 0).toFixed(2)}\`\n`; msg += `   ▫️ *رأس المال المسجل:* \`$${(capital || 0).toFixed(2)}\`\n`; msg += `   ▫️ *إجمالي الربح غير المحقق:* ${pnlEmoji} \`${pnlSign}${(pnl || 0).toFixed(2)}\` (\`${pnlSign}${(pnlPercent || 0).toFixed(2)}%\`)\n`; msg += dailyPnlText; msg += liquidityText + `\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n`; msg += `💎 *مكونات المحفظة:*\n`; assets.forEach((a, index) => { let percent = total > 0 ? ((a.value / total) * 100) : 0; msg += "\n"; if (a.asset === "USDT") { msg += `*USDT* (الرصيد النقدي) 💵\n`; msg += `*القيمة:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)`; } else { const change24hPercent = (a.change24h || 0) * 100; const changeEmoji = change24hPercent >= 0 ? '🟢⬆️' : '🔴⬇️'; const changeSign = change24hPercent >= 0 ? '+' : ''; msg += `╭─ *${a.asset}/USDT*\n`; msg += `├─ *القيمة الحالية:* \`$${(a.value || 0).toFixed(2)}\` (*الوزن:* \`${(percent || 0).toFixed(2)}%\`)\n`; msg += `├─ *سعر السوق:* \`$${(a.price || 0).toFixed(4)}\`\n`; msg += `├─ *الأداء اليومي:* ${changeEmoji} \`${changeSign}${(change24hPercent || 0).toFixed(2)}%\`\n`; const position = positions[a.asset]; if (position && position.avgBuyPrice > 0) { const avgBuyPrice = position.avgBuyPrice; const totalCost = avgBuyPrice * a.amount; const assetPnl = a.value - totalCost; const assetPnlPercent = (totalCost > 0) ? (assetPnl / totalCost) * 100 : 0; const assetPnlEmoji = assetPnl >= 0 ? '🟢⬆️' : '🔴⬇️'; const assetPnlSign = assetPnl >= 0 ? '+' : ''; msg += `├─ *متوسط الشراء:* \`$${(avgBuyPrice || 0).toFixed(4)}\`\n`; msg += `╰─ *ربح/خسارة غير محقق:* ${assetPnlEmoji} \`${assetPnlSign}${(assetPnl || 0).toFixed(2)}\` (\`${assetPnlSign}${(assetPnlPercent || 0).toFixed(2)}%\`)`; } else { msg += `╰─ *متوسط الشراء:* \`غير مسجل\``; } } if (index < assets.length - 1) { msg += `\n━━━━━━━━━━━━━━━━━━━━`; } }); return msg; }
 
+// Other functions (checkPriceAlerts, runDailyJobs, checkPriceMovements) can be included here
+// ...
+
 // --- Bot Command and Callback Handlers ---
-// ... (The rest of the code is omitted for brevity as it is largely unchanged) ...
-// The callback handler needs a slight modification for publish_trade
+// (The code is omitted for brevity but should be included in the final file)
+// ...
 
 bot.on("callback_query:data", async (ctx) => {
     try {
@@ -244,10 +250,10 @@ async function startBot() {
             app.get("/", (req, res) => res.status(200).send("OK! Bot is alive."));
 
             app.use(webhookCallback(bot, "express"));
-            app.listen(PORT, () => { console.log(`بوت v60 (Healthcheck Fix) يستمع على المنفذ ${PORT}`); });
+            app.listen(PORT, () => { console.log(`بوت v61 (Final Format) يستمع على المنفذ ${PORT}`); });
         } else {
             bot.start();
-            console.log("Bot v60 (Healthcheck Fix) started with polling.");
+            console.log("Bot v61 (Final Format) started with polling.");
         }
 
         setInterval(monitorBalanceChanges, 60000); // Check every 60 seconds
