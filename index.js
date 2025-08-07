@@ -545,7 +545,30 @@ const mainKeyboard = new Keyboard()
     .text("⚙️ الإعدادات").resized();
 
 async function sendSettingsMenu(ctx) {
-    // This function is complete and unchanged
+    try {
+        const settings = await loadSettings();
+        const settingsKeyboard = new InlineKeyboard()
+            .text("💰 تعيين رأس المال", "set_capital")
+            .text("💼 عرض المراكز المفتوحة", "view_positions").row()
+            .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts")
+            .text("🗑️ حذف تنبيه سعر", "delete_alert").row()
+            .text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
+            .text(`🚀 النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
+            .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
+            .text("🔥 حذف جميع بيانات البوت 🔥", "delete_all_data");
+        const text = "⚙️ *لوحة التحكم والإعدادات الرئيسية*";
+        
+        try {
+            // Try to edit the message if it's a callback query
+            await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard });
+        } catch {
+            // Otherwise, send a new message
+            await ctx.reply(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard });
+        }
+    } catch (e) {
+        console.error("CRITICAL ERROR in sendSettingsMenu:", e);
+        await ctx.reply(`❌ حدث خطأ فادح أثناء محاولة فتح قائمة الإعدادات.\n\nرسالة الخطأ: ${e.message}`);
+    }
 }
 
 async function sendMovementAlertsMenu(ctx) {
