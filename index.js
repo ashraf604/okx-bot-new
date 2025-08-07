@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - index.js (Full Version v60, Webhook Fix)
+// OKX Advanced Analytics Bot - index.js (Final v60 with Webhook)
 // =================================================================
 
 const express = require("express");
@@ -17,7 +17,7 @@ const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID, 10);
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 const API_BASE_URL = "https://www.okx.com";
 
-// Middleware to parse JSON for webhook
+// Parse JSON bodies for webhook
 app.use(express.json());
 
 // --- State ---
@@ -481,139 +481,5 @@ bot.on("callback_query:data", async (ctx) => {
     await bot.api.sendMessage(TARGET_CHANNEL_ID, txt, {
       parse_mode: "Markdown",
     });
-    await ctx.editMessageText("✅ تم النشر في القناة", {
-      reply_markup: undefined,
-    });
+    await ctx.editMessageText("✅ تم النشر في القناة",
 
-  } else if (d === "ignore_trade") {
-    await ctx.editMessageText("❌ تم التجاهل", {
-      reply_markup: undefined,
-    });
-
-  } else if (d === "view_positions") {
-    const positions = await loadPositions();
-    if (Object.keys(positions).length === 0) {
-      await ctx.editMessageText("ℹ️ لا توجد مراكز مفتوحة حالياً.", {
-        reply_markup: new InlineKeyboard().text("🔙 رجوع", "back_to_settings"),
-      });
-    } else {
-      let text = "📄 *المراكز المفتوحة:*";
-      for (const [sym, pos] of Object.entries(positions)) {
-        text += `\n\n- *${sym}*\n  • متوسط الشراء: \`$${pos.avgBuy.toFixed(
-          4
-        )}\`\n  • إجمالي المشتريات: \`${pos.totalBought.toFixed(
-          6
-        )}\`\n  • تاريخ الفتح: \`${new Date(pos.open).toLocaleDateString(
-          "ar-EG"
-        )}\``;
-      }
-      await ctx.editMessageText(text, {
-        parse_mode: "Markdown",
-        reply_markup: new InlineKeyboard().text("🔙 رجوع", "back_to_settings"),
-      });
-    }
-
-  } else if (d === "back_to_settings") {
-    await sendSettingsMenu(ctx);
-
-  } else if (d === "manage_movement_alerts") {
-    await sendMovementAlertsMenu(ctx);
-
-  } else if (d === "set_global_alert") {
-    waitingState = "set_global";
-    await ctx.editMessageText("✍️ أرسل النسبة العامة لتنبيهات الحركة:");
-
-  } else if (d === "set_coin_alert") {
-    waitingState = "set_coin";
-    await ctx.editMessageText("✍️ أرسل رمز العملة والنسبة (مثال: BTC 2.5):");
-
-  } else if (d === "toggle_summary" ||
-             d === "toggle_autopost" ||
-             d === "toggle_debug") {
-    const s = await loadSettings();
-    if (d === "toggle_summary") s.dailySummary = !s.dailySummary;
-    if (d === "toggle_autopost") s.autoPostToChannel = !s.autoPostToChannel;
-    if (d === "toggle_debug") s.debugMode = !s.debugMode;
-    await saveSettings(s);
-    await sendSettingsMenu(ctx);
-
-  } else if (d === "delete_all_data") {
-    waitingState = "confirm_delete";
-    await ctx.editMessageText(
-      "⚠️ *تحذير: هذا الإجراء لا يمكن التراجع عنه!* ⚠️\n\n" +
-      "للمتابعة، أرسل كلمة: `تأكيد الحذف`",
-      { parse_mode: "Markdown" }
-    );
-  }
-});
-
-bot.on("message:text", async (ctx) => {
-  const txt = ctx.message.text.trim();
-  if (txt.startsWith("/")) return;
-
-  if (waitingState) {
-    const st = waitingState;
-    waitingState = null;
-
-    if (st === "set_global") {
-      const p = Number(txt);
-      if (!isNaN(p) && p > 0) {
-        const s = await loadAlertSettings();
-        s.global = p;
-        await saveAlertSettings(s);
-        await ctx.reply(`✅ تم تحديث النسبة العامة إلى ${p}%`);
-      } else {
-        await ctx.reply("❌ قيمة خاطئة. أرسل رقماً صحيحاً.");
-      }
-
-    } else if (st === "set_coin") {
-      const [sym, pr] = txt.split(/\s+/);
-      const pp = Number(pr);
-      if (sym && !isNaN(pp) && pp >= 0) {
-        const s = await loadAlertSettings();
-        if (pp === 0) delete s.overrides[sym.toUpperCase()];
-        else s.overrides[sym.toUpperCase()] = pp;
-        await saveAlertSettings(s);
-        await ctx.reply(`✅ تم تحديث نسبة ${sym.toUpperCase()} إلى ${pp}%`);
-      } else {
-        await ctx.reply("❌ صيغة خاطئة. مثال: BTC 2.5");
-      }
-
-    } else if (st === "set_capital") {
-      const v = Number(txt);
-      if (!isNaN(v) && v >= 0) {
-        await saveCapital(v);
-        await ctx.reply(`✅ تم تعيين رأس المال إلى $${v.toFixed(2)}`);
-      } else {
-        await ctx.reply("❌ قيمة خاطئة. أرسل رقماً فقط.");
-      }
-
-    } else if (st === "confirm_delete") {
-      if (txt === "تأكيد الحذف") {
-        await getCollection("configs").deleteMany({});
-        await ctx.reply("✅ تم حذف جميع البيانات.");
-      } else {
-        await ctx.reply("❌ تم إلغاء العملية.");
-      }
-    }
-  }
-});
-
-// ========== Start Server & Bot ==========
-async function startBot() {
-  try {
-    await connectDB();
-    console.log("MongoDB connected.");
-
-    // Schedule monitoring
-    setInterval(monitorBalanceChanges, 60000);
-
-    app.listen(PORT, () =>
-      console.log(`Server running on port ${PORT}`)
-    );
-  } catch (e) {
-    console.error("Startup error:", e);
-  }
-}
-
-startBot();
