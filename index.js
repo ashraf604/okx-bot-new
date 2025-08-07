@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - index.js (Final v62, Stable on Railway)
+// OKX Advanced Analytics Bot - index.js (Final v63, Stable & Full-Featured)
 // =================================================================
 
 const express = require("express");
@@ -38,13 +38,15 @@ async function saveConfig(id, data) {
   } catch {}
 }
 
-const loadSettings = () => getConfig("settings", { autoPostToChannel: false, debugMode: false });
+const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
+const saveCapital = (value) => saveConfig("capital", { value });
+const loadSettings = () => getConfig("settings", { dailySummary: true, autoPostToChannel: false, debugMode: false });
 const saveSettings = (settings) => saveConfig("settings", settings);
+const loadPositions = () => getConfig("positions", {});
+const savePositions = (positions) => saveConfig("positions", positions);
 const loadBalanceState = () => getConfig("balanceState", {});
 const saveBalanceState = (state) => saveConfig("balanceState", state);
-// (بقية دوال التحميل والحفظ كما هي)
-const loadPositions = () => getConfig("positions", {});
-const savePositions = (p) => saveConfig("positions", p);
+// (بقية الدوال المساعدة كما هي)
 
 // ========== OKX API & Helpers ==========
 function getHeaders(method, path, body = "") {
@@ -62,7 +64,7 @@ async function getMarketPrices() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`);
     const json = await res.json();
-    if (json.code !== "0") return null;
+    if (json.code !== '0') return null;
     return json.data.reduce((acc, t) => {
       acc[t.instId] = { price: parseFloat(t.last), change24h: parseFloat(t.open24h) > 0 ? (parseFloat(t.last) - parseFloat(t.open24h)) / parseFloat(t.open24h) : 0 };
       return acc;
@@ -115,7 +117,6 @@ async function updatePositionAndAnalyze(asset, diff, price, newAmt) {
     return report;
 }
 
-
 async function monitorBalanceChanges() {
     try {
         const prevState = await loadBalanceState();
@@ -128,13 +129,10 @@ async function monitorBalanceChanges() {
         const prices = await getMarketPrices();
         if (!prices) return;
 
-        // Note: Using a simplified total value calculation here for trade detection logic.
-        // A full portfolio calculation might be needed for more detailed reports.
         const currentTotalValue = Object.entries(currentBal).reduce((sum, [ccy, amt]) => {
             const price = prices[`${ccy}-USDT`] ? prices[`${ccy}-USDT`].price : (ccy === 'USDT' ? 1 : 0);
             return sum + (amt * price);
         }, 0);
-
 
         if (Object.keys(prevBal).length === 0) {
             await saveBalanceState({ balances: currentBal, totalValue: currentTotalValue });
@@ -208,31 +206,70 @@ async function monitorBalanceChanges() {
 
 
 // ========== Express Server & Bot Start ==========
-
-// **الحل هنا**: تعريف معالج فحص الصحة قبل أي middleware خاص بالبوت
 app.use(express.json());
 app.get("/healthcheck", (req, res) => {
     res.status(200).send("OK");
 });
 
-
-// تطبيق Middleware التحقق من هوية المستخدم على جميع الطلبات الأخرى
 bot.use(async (ctx, next) => {
     if (ctx.from?.id === AUTHORIZED_USER_ID) {
         await next();
-    } else {
-        // لا تفعل شيئًا للطلبات غير المصرح بها لتجنب أي مشاكل
     }
 });
 
-// (هنا بقية أوامر البوت مثل /start, /settings ومعالجات callback_query)
+const mainKeyboard = new Keyboard()
+    .text("📊 عرض المحفظة").row()
+    .text("⚙️ الإعدادات").resized();
+
 bot.command("start", (ctx) => {
-    ctx.reply("🤖 بوت OKX التحليلي v62 يعمل الآن!");
+    ctx.reply("🤖 بوت OKX التحليلي v63 يعمل الآن!", { reply_markup: mainKeyboard });
+});
+
+async function sendSettingsMenu(ctx) {
+    const settings = await loadSettings();
+    const settingsKeyboard = new InlineKeyboard()
+        .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
+        .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug");
+    
+    const text = "⚙️ *الإعدادات*";
+    try {
+        await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard });
+    } catch {
+        await ctx.reply(text, { parse_mode: "Markdown", reply_markup: settingsKeyboard });
+    }
+}
+
+bot.on("message:text", async (ctx) => {
+    const text = ctx.message.text.trim();
+    if (text === "⚙️ الإعدادات") {
+        await sendSettingsMenu(ctx);
+    } else if (text === "📊 عرض المحفظة") {
+        await ctx.reply("⏳ جارٍ حساب قيمة المحفظة...");
+        const prices = await getMarketPrices();
+        if (!prices) {
+            return await ctx.reply("❌ لا يمكن جلب أسعار السوق حاليًا.");
+        }
+        const balance = await getBalanceForComparison();
+        if (!balance) {
+            return await ctx.reply("❌ لا يمكن جلب رصيد المحفظة حاليًا.");
+        }
+        const totalValue = Object.entries(balance).reduce((sum, [ccy, amt]) => {
+            const price = prices[`${ccy}-USDT`] ? prices[`${ccy}-USDT`].price : (ccy === 'USDT' ? 1 : 0);
+            return sum + (amt * price);
+        }, 0);
+        await ctx.reply(`📊 *قيمة المحفظة الإجمالية:* \`$${totalValue.toFixed(2)}\``, { parse_mode: "Markdown" });
+    }
 });
 
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
-    if (data === "publish_trade") {
+    if (data === "toggle_autopost" || data === "toggle_debug") {
+        const settings = await loadSettings();
+        if (data === 'toggle_autopost') settings.autoPostToChannel = !settings.autoPostToChannel;
+        if (data === 'toggle_debug') settings.debugMode = !settings.debugMode;
+        await saveSettings(settings);
+        await sendSettingsMenu(ctx);
+    } else if (data === "publish_trade") {
         const textToPublish = ctx.callbackQuery.message.text.replace("*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n", "");
         try {
             await bot.api.sendMessage(TARGET_CHANNEL_ID, textToPublish, { parse_mode: "Markdown" });
@@ -245,32 +282,26 @@ bot.on("callback_query:data", async (ctx) => {
     }
 });
 
-
 async function startBot() {
     console.log("▶️ بدء تشغيل البوت...");
     try {
         await connectDB();
         console.log("✅ تم الاتصال بقاعدة البيانات بنجاح.");
 
-        // جدولة المهام
-        setInterval(monitorBalanceChanges, 60000); // 60 ثانية
+        setInterval(monitorBalanceChanges, 60000);
         console.log("✅ تم جدولة مهمة تتبع الصفقات.");
 
-        // بدء البوت بوضعية Polling
         await bot.start();
         console.log("🤖 البوت بدأ ويعمل في وضعية Polling.");
 
-        // بدء الخادم للرد على فحص الصحة
         app.listen(PORT, () => {
             console.log(`🌐 الخادم يستمع على المنفذ ${PORT} وجاهز لفحص الصحة.`);
         });
 
     } catch (e) {
         console.error("❌ فشل حاد في بدء تشغيل البوت:", e);
-        process.exit(1); // إنهاء العملية في حالة الفشل الحاد
+        process.exit(1);
     }
 }
 
-// تشغيل البوت
 startBot();
-
