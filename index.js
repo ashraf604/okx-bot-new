@@ -1060,3 +1060,20 @@ async function startBot() {
 }
 
 startBot();
+// في نهاية الملف index.js
+console.log("🚀 Initializing startBot...");
+startBot();
+
+async function startBot() {
+    console.log("▶️ Entered startBot()");
+    try {
+        await connectDB();
+        console.log("MongoDB connected.");
+        // ... بقية جدول المهام
+        await bot.start();  // polling دائم
+        console.log("🤖 Bot polling started successfully.");
+        app.listen(PORT, () => console.log(`🌐 Healthcheck server on port ${PORT}`));
+    } catch (e) {
+        console.error("❌ startBot failed:", e);
+    }
+}
