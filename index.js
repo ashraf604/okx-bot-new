@@ -1,6 +1,5 @@
 // =================================================================
 // OKX Advanced Analytics Bot - v59 (Fixed & Complete)
-// - MODIFIED BY GEMINI FOR CUSTOM MESSAGE FORMATS
 // =================================================================
 
 const express = require("express");
@@ -107,7 +106,7 @@ async function getPortfolio(prices) {
         const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
         const json = await res.json();
         if (json.code !== '0') return { error: `فشل جلب المحفظة من OKX: ${json.msg}` };
-
+        
         let assets = [], total = 0;
         json.data[0]?.details?.forEach(asset => {
             const amount = parseFloat(asset.eq);
@@ -122,7 +121,7 @@ async function getPortfolio(prices) {
                 }
             }
         });
-
+        
         const filteredAssets = assets.filter(a => a.value >= 1);
         filteredAssets.sort((a, b) => b.value - a.value);
         return { assets: filteredAssets, total };
@@ -249,12 +248,12 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
         console.error(`Invalid data for updatePositionAndAnalyze: asset=${asset}, price=${price}`);
         return null;
     }
-
+    
     const positions = await loadPositions();
     const position = positions[asset];
     const tradeValue = Math.abs(amountChange) * price;
     let retrospectiveReport = null;
-
+    
     if (amountChange > 0) {
         if (!position) {
             positions[asset] = {
@@ -340,9 +339,9 @@ async function formatPortfolioMsg(assets, total, capital) {
     const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0;
     const investedPercent = 100 - cashPercent;
     const liquidityText = ` ▫️ *توزيع السيولة:* 💵 نقدي ${(cashPercent || 0).toFixed(1)}% / 📈 مستثمر ${(investedPercent || 0).toFixed(1)}%`;
-
+    
     let msg = `🧾 *التقرير التحليلي للمحفظة*\n\n`;
-    msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}\n`;
+    msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
     msg += `━━━━━━━━━━━━━━━━━━━\n`;
     msg += `📊 *نظرة عامة على الأداء:*\n`;
     msg += ` ▫️ *القيمة الإجمالية:* \`$${(total || 0).toFixed(2)}\`\n`;
@@ -352,7 +351,7 @@ async function formatPortfolioMsg(assets, total, capital) {
     msg += liquidityText + `\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `💎 *مكونات المحفظة:*\n`;
-
+    
     assets.forEach((a, index) => {
         let percent = total > 0 ? ((a.value / total) * 100) : 0;
         msg += "\n";
@@ -388,16 +387,13 @@ async function formatPortfolioMsg(assets, total, capital) {
     return msg;
 }
 
-// =================================================================
-// START: MODIFIED monitorBalanceChanges FUNCTION
-// =================================================================
 async function monitorBalanceChanges() {
     try {
         await sendDebugMessage("بدء دورة التحقق من الصفقات...");
         let previousState = await loadBalanceState();
         let previousBalanceState = previousState.balances || {};
         let previousTotalPortfolioValue = previousState.totalValue || 0;
-
+        
         const currentBalance = await getBalanceForComparison();
         if (!currentBalance) {
             await sendDebugMessage("فشل جلب الرصيد الحالي للمقارنة.");
@@ -428,46 +424,40 @@ async function monitorBalanceChanges() {
             const prevAmount = previousBalanceState[asset] || 0;
             const currAmount = currentBalance[asset] || 0;
             const difference = currAmount - prevAmount;
-
+            
             const priceData = prices[`${asset}-USDT`];
             if (!priceData || !priceData.price || isNaN(priceData.price)) {
                 await sendDebugMessage(`لا يمكن العثور على سعر صحيح لـ ${asset}.`);
                 continue;
             }
-
+            
             if (Math.abs(difference * priceData.price) < 0.1) continue;
 
             tradesDetected = true;
             const price = priceData.price;
-            
             const retrospectiveReport = await updatePositionAndAnalyze(asset, difference, price, currAmount);
 
-            const updatedPositions = await loadPositions();
-            const currentPosition = updatedPositions[asset];
-            const averageBuyPrice = currentPosition ? currentPosition.avgBuyPrice : price; 
+            if (retrospectiveReport) {
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, retrospectiveReport, { parse_mode: "Markdown" });
+            }
 
             const tradeValue = Math.abs(difference) * price;
             const newAssetValue = currAmount * price;
             const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
+
             const usdtAsset = currentAssets.find(a => a.asset === 'USDT') || { value: 0 };
             const newCashValue = usdtAsset.value;
             const newCashPercentage = newTotalPortfolioValue > 0 ? (newCashValue / newTotalPortfolioValue) * 100 : 0;
+
             const entryOfPortfolio = previousTotalPortfolioValue > 0 ? (tradeValue / previousTotalPortfolioValue) * 100 : 0;
-            
-            const initialCash = previousBalanceState['USDT'] || 0;
-            const cashConsumptionPercent = initialCash > 0 ? (tradeValue / initialCash) * 100 : 0;
 
             let tradeType = "";
-            let recommendationType = "";
             if (difference > 0) {
                 tradeType = "شراء 🟢⬆️";
-                recommendationType = "شراء 🟢⬆️";
             } else {
                 tradeType = (currAmount * price < 1) ? "إغلاق مركز 🔴⬇️" : "بيع جزئي 🟠";
-                recommendationType = (currAmount * price < 1) ? "إغلاق الصفقة 🔴⬇️" : "بيع جزئي 🟠";
             }
-            
-            // --- MESSAGE 1: Detailed Private Message for YOU ---
+
             const privateTradeAnalysisText = `🔔 **تحليل حركة تداول**\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `🔸 **العملية:** ${tradeType}\n` +
@@ -475,7 +465,7 @@ async function monitorBalanceChanges() {
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `📝 **تفاصيل الصفقة:**\n` +
                 ` ▫️ *سعر التنفيذ:* \`$${(price || 0).toFixed(4)}\`\n` +
-                ` ▫️ *الكمية:* \`${Math.abs(difference).toFixed(5)}\`\n` +
+                ` ▫️ *الكمية:* \`${Math.abs(difference).toFixed(6)}\`\n` +
                 ` ▫️ *قيمة الصفقة:* \`$${tradeValue.toFixed(2)}\`\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `📊 **التأثير على المحفظة:**\n` +
@@ -486,45 +476,22 @@ async function monitorBalanceChanges() {
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*`;
 
-            // --- MESSAGE 2: Simplified Public Message for the CHANNEL ---
-            const publicChannelPostText = `🔔 **توصية: ${recommendationType}**\n\n` +
-                `🔸 **الأصل:** \`${asset}/USDT\`\n\n` +
-                `📝 **تفاصيل الدخول:**\n` +
-                `   ▫️ *متوسط سعر الشراء:* \`$${(averageBuyPrice || 0).toFixed(4)}\`\n` +
-                `   ▫️ *حجم الدخول من المحفظة:* \`${entryOfPortfolio.toFixed(2)}%\`\n\n` +
-                `📊 **التأثير على المحفظة:**\n` +
-                `   ▫️ *نسبة استهلاك الكاش:* \`${cashConsumptionPercent.toFixed(2)}%\`\n` +
-                `   ▫️ *الوزن الجديد للعملة:* \`${portfolioPercentage.toFixed(2)}%\`\n\n` +
-                `*بتاريخ: ${new Date().toLocaleDateString("de-DE")}*`;
-            
-            if (retrospectiveReport) {
-                await bot.api.sendMessage(AUTHORIZED_USER_ID, retrospectiveReport, { parse_mode: "Markdown" });
-            }
-            
             const settings = await loadSettings();
             if (settings.autoPostToChannel) {
-                // If Auto-Post is ON
                 try {
-                    // Step 1: Send the simplified message to the Channel
-                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicChannelPostText, { parse_mode: "Markdown" });
-
-                    // Step 2: Send the detailed analysis directly to you
-                    await bot.api.sendMessage(AUTHORIZED_USER_ID, privateTradeAnalysisText, { parse_mode: "Markdown" });
-
+                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, privateTradeAnalysisText, { parse_mode: "Markdown" });
+                    await bot.api.sendMessage(AUTHORIZED_USER_ID, "✅ تم نشر الصفقة تلقائيًا في القناة.", { parse_mode: "Markdown" });
                 } catch (e) {
                     console.error("Failed to auto-post to channel:", e);
                     await bot.api.sendMessage(AUTHORIZED_USER_ID, "❌ فشل النشر التلقائي في القناة. يرجى التحقق من صلاحيات البوت.", { parse_mode: "Markdown" });
                 }
             } else {
-                // If Auto-Post is OFF (Manual Confirmation)
-                const hiddenMarker = `\n<CHANNEL_POST>${JSON.stringify(publicChannelPostText)}</CHANNEL_POST>`;
                 const confirmationKeyboard = new InlineKeyboard()
                     .text("✅ تأكيد ونشر في القناة", "publish_trade")
                     .text("❌ تجاهل الصفقة", "ignore_trade");
-
                 await bot.api.sendMessage(
                     AUTHORIZED_USER_ID,
-                    `*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n${privateTradeAnalysisText}${hiddenMarker}`,
+                    `*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n${privateTradeAnalysisText}`,
                     { parse_mode: "Markdown", reply_markup: confirmationKeyboard }
                 );
             }
@@ -541,9 +508,6 @@ async function monitorBalanceChanges() {
         console.error("CRITICAL ERROR in monitorBalanceChanges:", e);
     }
 }
-// =================================================================
-// END: MODIFIED monitorBalanceChanges FUNCTION
-// =================================================================
 
 async function checkPriceAlerts() {
     try {
@@ -784,7 +748,7 @@ bot.on("callback_query:data", async (ctx) => {
         await ctx.answerCallbackQuery();
         const data = ctx.callbackQuery.data;
         if (!ctx.callbackQuery.message) { console.log("Callback query has no message, skipping."); return; }
-
+        
         if (data.startsWith("chart_")) {
             const period = data.split('_')[1];
             await ctx.editMessageText("⏳ جاري إنشاء تقرير الأداء...");
@@ -802,43 +766,17 @@ bot.on("callback_query:data", async (ctx) => {
             try { await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" }); await ctx.deleteMessage(); } catch (e) { console.error("Failed to send chart:", e); await ctx.editMessageText("❌ فشل إنشاء الرسم البياني. قد تكون هناك مشكلة في خدمة الرسوم البيانية."); }
             return;
         }
-
-        // =================================================================
-        // START: MODIFIED 'publish_trade' HANDLER
-        // =================================================================
+        
         if (data.startsWith("publish_")) {
-            const originalText = ctx.callbackQuery.message.text;
-            const markerStart = originalText.indexOf("<CHANNEL_POST>");
-            const markerEnd = originalText.indexOf("</CHANNEL_POST>");
-            
-            let messageForChannel = "حدث خطأ في استخلاص نص التوصية."; // Fallback message
-
-            if (markerStart !== -1 && markerEnd !== -1) {
-                const jsonString = originalText.substring(markerStart + 14, markerEnd);
-                try {
-                    messageForChannel = JSON.parse(jsonString);
-                } catch (e) {
-                    console.error("Failed to parse channel post JSON:", e);
-                    messageForChannel = originalText.replace(/\n<CHANNEL_POST>[\s\S]*<\/CHANNEL_POST>/, '').replace("*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n", "");
-                }
-            } else {
-                 messageForChannel = originalText.replace("*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n", "");
-            }
+            let finalRecommendation = ctx.callbackQuery.message.text.replace("*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n", "");
             try {
-                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, messageForChannel, { parse_mode: "Markdown" });
+                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, finalRecommendation, { parse_mode: "Markdown" });
                 await ctx.editMessageText("✅ تم نشر الصفقة في القناة بنجاح.", { reply_markup: undefined });
-            } catch (e) { 
-                console.error("Failed to post to channel:", e); 
-                await ctx.editMessageText("❌ فشل النشر في القناة. تأكد من أن البوت لديه صلاحيات النشر في القناة المستهدفة.", { reply_markup: undefined }); 
-            }
+            } catch (e) { console.error("Failed to post to channel:", e); await ctx.editMessageText("❌ فشل النشر في القناة. تأكد من أن البوت لديه صلاحيات النشر في القناة المستهدفة.", { reply_markup: undefined }); }
             return;
         }
-        // =================================================================
-        // END: MODIFIED 'publish_trade' HANDLER
-        // =================================================================
-
         if (data === "ignore_trade") { await ctx.editMessageText("❌ تم تجاهل الصفقة ولن يتم نشرها.", { reply_markup: undefined }); return; }
-
+        
         switch (data) {
             case "view_positions":
                 const positions = await loadPositions();
@@ -961,4 +899,3 @@ async function startBot() {
 }
 
 startBot();
-
