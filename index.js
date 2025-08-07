@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - index.js (Full Version v60)
+// OKX Advanced Analytics Bot - index.js (Full Version v60, Webhook Fix)
 // =================================================================
 
 const express = require("express");
@@ -18,9 +18,7 @@ const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 const API_BASE_URL = "https://www.okx.com";
 
 // Middleware to parse JSON for webhook
-if (process.env.NODE_ENV === "production") {
-  app.use(express.json());
-}
+app.use(express.json());
 
 // --- State ---
 let waitingState = null;
@@ -359,6 +357,9 @@ async function monitorBalanceChanges() {
 // ========== Healthcheck ==========
 app.get("/healthcheck", (req, res) => res.status(200).send("OK"));
 
+// ========== Webhook Endpoint ==========
+app.post("/webhook", webhookCallback(bot, "express"));
+
 // ========== Bot UI & Handlers ==========
 
 const mainKeyboard = new Keyboard()
@@ -438,7 +439,7 @@ bot.command("start", async (ctx) => {
 
 bot.command("settings", sendSettingsMenu);
 
-// /pnl command fix
+// /pnl command
 bot.command("pnl", async (ctx) => {
   const parts = ctx.message.text.trim().split(/\s+/);
   const args = parts.slice(1);
@@ -607,15 +608,9 @@ async function startBot() {
     // Schedule monitoring
     setInterval(monitorBalanceChanges, 60000);
 
-    if (process.env.NODE_ENV === "production") {
-      app.use(webhookCallback(bot, "express"));
-      app.listen(PORT, () =>
-        console.log(`Server running in production on port ${PORT}`)
-      );
-    } else {
-      await bot.start();
-      console.log("Bot polling started.");
-    }
+    app.listen(PORT, () =>
+      console.log(`Server running on port ${PORT}`)
+    );
   } catch (e) {
     console.error("Startup error:", e);
   }
