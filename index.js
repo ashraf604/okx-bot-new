@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - index.js (v64 - Stable & Full-Featured)
+// OKX Advanced Analytics Bot - index.js (v65 - Stable & Full-Featured)
 // =================================================================
 
 const express = require("express");
@@ -52,9 +52,6 @@ const loadBalanceState = () => getConfig("balanceState", {});
 const saveBalanceState = (state) => saveConfig("balanceState", state);
 const loadAlerts = () => getConfig("priceAlerts", []);
 const saveAlerts = (alerts) => saveConfig("priceAlerts", alerts);
-const loadAlertSettings = () => getConfig("alertSettings", { global: 5, overrides: {} });
-const saveAlertSettings = (s) => saveConfig("alertSettings", s);
-// (بقية الدوال المساعدة موجودة بالأسفل)
 
 // ========== OKX API & Helpers ==========
 function getHeaders(method, path, body = "") {
@@ -125,6 +122,7 @@ async function updatePositionAndAnalyze(asset, diff, price, newAmt) {
     return report;
 }
 
+
 async function monitorBalanceChanges() {
     try {
         const prevState = await loadBalanceState();
@@ -175,7 +173,7 @@ async function monitorBalanceChanges() {
 
             const privateText =
                 `🔔 **تحليل حركة تداول**\n` +
-                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n`+
                 `*العملية:* ${tradeType}\n` +
                 `*الأصل:* \`${asset}/USDT\`\n\n` +
                 `*سعر التنفيذ:* \`$${price.toFixed(4)}\`\n` +
@@ -184,7 +182,7 @@ async function monitorBalanceChanges() {
                 `*التأثير على المحفظة:*\n` +
                 ` ▫️ حجم الصفقة: \`${entryPct.toFixed(2)}%\`\n` +
                 ` ▫️ وزن العملة الجديد: \`${portPct.toFixed(2)}%\`\n` +
-                ` ▫️ نسبة الكاش الجديدة: \`${cashPct.toFixed(2)}%\`\n`;
+                ` ▫️ نسبة الكاش الجديدة: \`${cashPct.toFixed(2)}%\``;
 
             const settings = await loadSettings();
             if (settings.autoPostToChannel) {
@@ -213,7 +211,6 @@ async function monitorBalanceChanges() {
     }
 }
 
-
 // ========== Express Server & Bot Start ==========
 app.use(express.json());
 app.get("/healthcheck", (req, res) => {
@@ -233,7 +230,7 @@ const mainKeyboard = new Keyboard()
     .text("⚙️ الإعدادات").resized();
 
 bot.command("start", (ctx) => {
-    ctx.reply("🤖 بوت OKX التحليلي v64 يعمل الآن!", { reply_markup: mainKeyboard });
+    ctx.reply("🤖 بوت OKX التحليلي v65 يعمل الآن!", { reply_markup: mainKeyboard });
 });
 
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
@@ -255,39 +252,60 @@ bot.command("pnl", async (ctx) => {
 
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
+    
     if (waitingState) {
-        // Handle waiting states
-        // ... (هنا منطق waitingState)
-    } else {
-        switch (text) {
-            case "📊 عرض المحفظة":
-                // ... (منطق عرض المحفظة)
-                break;
-            case "📈 أداء المحفظة":
-                // ... (منطق أداء المحفظة)
-                break;
-            case "ℹ️ معلومات عملة":
-                // ... (منطق معلومات عملة)
-                break;
-            case "🔔 ضبط تنبيه":
-                // ... (منطق ضبط تنبيه)
-                break;
-            case "🧮 حاسبة الربح والخسارة":
-                await ctx.reply("استخدم الأمر `/pnl`.\nمثال: `/pnl 50000 60000 0.5`", { parse_mode: "Markdown" });
-                break;
-            case "⚙️ الإعدادات":
-                await sendSettingsMenu(ctx);
-                break;
+        const state = waitingState;
+        waitingState = null;
+        switch(state) {
+            case 'set_capital':
+                const amount = parseFloat(text);
+                if (!isNaN(amount) && amount >= 0) {
+                    await saveCapital(amount);
+                    await ctx.reply(`✅ تم تحديث رأس المال إلى \`$${amount.toFixed(2)}\``, { parse_mode: "Markdown" });
+                } else {
+                    await ctx.reply("❌ مبلغ غير صالح.");
+                }
+                return;
+            // ... (أضف حالات waitingState الأخرى هنا)
         }
+    }
+
+    switch (text) {
+        case "📊 عرض المحفظة":
+            await ctx.reply("⏳ جارٍ حساب قيمة المحفظة...");
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ لا يمكن جلب أسعار السوق حاليًا.");
+            const balance = await getBalanceForComparison();
+            if (!balance) return await ctx.reply("❌ لا يمكن جلب رصيد المحفظة حاليًا.");
+            const totalValue = Object.entries(balance).reduce((sum, [ccy, amt]) => {
+                const price = prices[`${ccy}-USDT`] ? prices[`${ccy}-USDT`].price : (ccy === 'USDT' ? 1 : 0);
+                return sum + (amt * price);
+            }, 0);
+            await ctx.reply(`📊 *قيمة المحفظة الإجمالية:* \`$${totalValue.toFixed(2)}\``, { parse_mode: "Markdown" });
+            break;
+        case "📈 أداء المحفظة":
+            await ctx.reply("ميزة الأداء قيد التطوير حاليًا.");
+            break;
+        case "ℹ️ معلومات عملة":
+            await ctx.reply("ميزة معلومات العملة قيد التطوير حاليًا.");
+            break;
+        case "🔔 ضبط تنبيه":
+            await ctx.reply("ميزة ضبط التنبيهات قيد التطوير حاليًا.");
+            break;
+        case "🧮 حاسبة الربح والخسارة":
+            await ctx.reply("استخدم الأمر `/pnl`.\nمثال: `/pnl 50000 60000 0.5`", { parse_mode: "Markdown" });
+            break;
+        case "⚙️ الإعدادات":
+            await sendSettingsMenu(ctx);
+            break;
     }
 });
 
 async function sendSettingsMenu(ctx) {
     const settings = await loadSettings();
     const settingsKeyboard = new InlineKeyboard()
-        .text("💰 تعيين رأس المال", "set_capital")
-        .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost")
-        .row()
+        .text("💰 تعيين رأس المال", "set_capital").row()
+        .text(`🚀 النشر التلقائي: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").row()
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug");
     
     const text = "⚙️ *الإعدادات*";
@@ -323,7 +341,6 @@ bot.on("callback_query:data", async (ctx) => {
         await ctx.editMessageText("❌ تم تجاهل الصفقة.");
     }
 });
-
 
 async function startBot() {
     console.log("▶️ بدء تشغيل البوت...");
