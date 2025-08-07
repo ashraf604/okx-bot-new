@@ -572,7 +572,24 @@ async function sendSettingsMenu(ctx) {
 }
 
 async function sendMovementAlertsMenu(ctx) {
-    // This function is complete and unchanged
+    try {
+        const alertSettings = await loadAlertSettings();
+        const text = `🚨 *إدارة تنبيهات حركة الأسعار*\n\nتستخدم هذه الإعدادات لمراقبة التغيرات المئوية في الأسعار وإعلامك.\n\n- *النسبة العامة الحالية:* سيتم تنبيهك لأي أصل يتحرك بنسبة \`${alertSettings.global}%\` أو أكثر.\n- يمكنك تعيين نسبة مختلفة لعملة معينة لتجاوز الإعداد العام.`;
+        const keyboard = new InlineKeyboard()
+            .text("📊 تعديل النسبة العامة", "set_global_alert").row()
+            .text("💎 تعديل نسبة عملة محددة", "set_coin_alert").row()
+            .text("📄 عرض الإعدادات الحالية", "view_movement_alerts").row()
+            .text("🔙 العودة إلى الإعدادات", "back_to_settings");
+        
+        try {
+            await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard });
+        } catch {
+            await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard });
+        }
+    } catch (e) {
+        console.error("CRITICAL ERROR in sendMovementAlertsMenu:", e);
+        await ctx.reply(`❌ حدث خطأ فادح أثناء فتح قائمة تنبيهات الحركة.\n\nرسالة الخطأ: ${e.message}`);
+    }
 }
 
 bot.use(async (ctx, next) => {
