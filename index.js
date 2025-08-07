@@ -1,6 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v59 (Fixed & Complete)
-// - MODIFIED BY GEMINI FOR CUSTOM MESSAGE FORMATS
+// OKX Advanced Analytics Bot - v59 (FINAL, COMPLETE & CORRECTED)
 // =================================================================
 
 const express = require("express");
@@ -381,7 +380,7 @@ async function formatPortfolioMsg(assets, total, capital) {
 }
 
 // =================================================================
-// START: MODIFIED monitorBalanceChanges FUNCTION
+// START: THE ONLY MODIFIED FUNCTION (monitorBalanceChanges)
 // =================================================================
 async function monitorBalanceChanges() {
     try {
@@ -391,20 +390,11 @@ async function monitorBalanceChanges() {
         let previousTotalPortfolioValue = previousState.totalValue || 0;
 
         const currentBalance = await getBalanceForComparison();
-        if (!currentBalance) {
-            await sendDebugMessage("فشل جلب الرصيد الحالي للمقارنة.");
-            return;
-        }
+        if (!currentBalance) { return; }
         const prices = await getMarketPrices();
-        if (!prices) {
-            await sendDebugMessage("فشل جلب أسعار السوق، سيتم إعادة المحاولة.");
-            return;
-        }
-        const { total: newTotalPortfolioValue, assets: currentAssets } = await getPortfolio(prices);
-        if (newTotalPortfolioValue === undefined) {
-            await sendDebugMessage("فشل حساب قيمة المحفظة الجديدة.");
-            return;
-        }
+        if (!prices) { return; }
+        const { total: newTotalPortfolioValue } = await getPortfolio(prices);
+        if (newTotalPortfolioValue === undefined) { return; }
 
         if (Object.keys(previousBalanceState).length === 0) {
             await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
@@ -422,22 +412,27 @@ async function monitorBalanceChanges() {
             const difference = currAmount - prevAmount;
 
             const priceData = prices[`${asset}-USDT`];
-            if (!priceData || !priceData.price || isNaN(priceData.price)) {
-                await sendDebugMessage(`لا يمكن العثور على سعر صحيح لـ ${asset}.`);
-                continue;
-            }
-
+            if (!priceData || !priceData.price || isNaN(priceData.price)) continue;
+            
             if (Math.abs(difference * priceData.price) < 0.1) continue;
 
             tradesDetected = true;
             const price = priceData.price;
             
+            // This function also handles deleting the position from the DB upon full close
             const retrospectiveReport = await updatePositionAndAnalyze(asset, difference, price, currAmount);
 
+            // If a position was fully closed, the report is generated. We send it and we are done with this asset.
+            if (retrospectiveReport) {
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, retrospectiveReport, { parse_mode: "Markdown" });
+                // We still need to announce the close in the channel, so we don't skip the rest of the logic.
+            }
+            
+            // --- Calculations for the messages ---
+            const { assets: currentAssets } = await getPortfolio(prices); 
             const updatedPositions = await loadPositions();
             const currentPosition = updatedPositions[asset];
-            const averageBuyPrice = currentPosition ? currentPosition.avgBuyPrice : price; 
-
+            
             const tradeValue = Math.abs(difference) * price;
             const newAssetValue = currAmount * price;
             const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
@@ -445,12 +440,8 @@ async function monitorBalanceChanges() {
             const newCashValue = usdtAsset.value;
             const newCashPercentage = newTotalPortfolioValue > 0 ? (newCashValue / newTotalPortfolioValue) * 100 : 0;
             const entryOfPortfolio = previousTotalPortfolioValue > 0 ? (tradeValue / previousTotalPortfolioValue) * 100 : 0;
-            
-            const initialCash = previousBalanceState['USDT'] || 0;
-            const cashConsumptionPercent = initialCash > 0 ? (tradeValue / initialCash) * 100 : 0;
 
-            let tradeType = "";
-            let recommendationType = "";
+            let tradeType, recommendationType;
             if (difference > 0) {
                 tradeType = "شراء 🟢⬆️";
                 recommendationType = "شراء 🟢⬆️";
@@ -458,14 +449,15 @@ async function monitorBalanceChanges() {
                 tradeType = (currAmount * price < 1) ? "إغلاق مركز 🔴⬇️" : "بيع جزئي 🟠";
                 recommendationType = (currAmount * price < 1) ? "إغلاق الصفقة 🔴⬇️" : "بيع جزئي 🟠";
             }
-            
+
+            // --- Build Private Message ---
             const privateTradeAnalysisText = `🔔 **تحليل حركة تداول**\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `🔸 **العملية:** ${tradeType}\n` +
                 `🔸 **الأصل:** \`${asset}/USDT\`\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `📝 **تفاصيل الصفقة:**\n` +
-                ` ▫️ *سعر التنفيذ:* \`$${(price || 0).toFixed(4)}\`\n` +
+                ` ▫️ *سعر التنفيذ:* \`$${price.toFixed(4)}\`\n` +
                 ` ▫️ *الكمية:* \`${Math.abs(difference).toFixed(5)}\`\n` +
                 ` ▫️ *قيمة الصفقة:* \`$${tradeValue.toFixed(2)}\`\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -476,39 +468,54 @@ async function monitorBalanceChanges() {
                 ` ▫️ *نسبة الكاش الجديدة:* \`${newCashPercentage.toFixed(2)}%\`\n` +
                 `━━━━━━━━━━━━━━━━━━━━\n` +
                 `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*`;
-
-            const publicChannelPostText = `🔔 **توصية: ${recommendationType}**\n\n` +
-                `🔸 **الأصل:** \`${asset}/USDT\`\n\n` +
-                `📝 **تفاصيل الدخول:**\n` +
-                `   ▫️ *متوسط سعر الشراء:* \`$${(averageBuyPrice || 0).toFixed(4)}\`\n` +
-                `   ▫️ *حجم الدخول من المحفظة:* \`${entryOfPortfolio.toFixed(2)}%\`\n\n` +
-                `📊 **التأثير على المحفظة:**\n` +
-                `   ▫️ *نسبة استهلاك الكاش:* \`${cashConsumptionPercent.toFixed(2)}%\`\n` +
-                `   ▫️ *الوزن الجديد للعملة:* \`${portfolioPercentage.toFixed(2)}%\`\n\n` +
-                `*بتاريخ: ${new Date().toLocaleDateString("de-DE")}*`;
             
-            if (retrospectiveReport) {
-                await bot.api.sendMessage(AUTHORIZED_USER_ID, retrospectiveReport, { parse_mode: "Markdown" });
+            // --- Build Intelligent Public Message ---
+            let publicChannelPostText;
+            if (difference > 0) { // It's a BUY
+                const initialCash = previousBalanceState['USDT'] || 0;
+                const cashConsumptionPercent = initialCash > 0 ? (tradeValue / initialCash) * 100 : 0;
+                const averageBuyPrice = currentPosition ? currentPosition.avgBuyPrice : price; 
+
+                publicChannelPostText = `🔔 **توصية: ${recommendationType}**\n\n` +
+                    `🔸 **الأصل:** \`${asset}/USDT\`\n\n` +
+                    `📝 **تفاصيل الدخول:**\n` +
+                    `   ▫️ *متوسط سعر الشراء:* \`$${averageBuyPrice.toFixed(4)}\`\n` +
+                    `   ▫️ *حجم الدخول من المحفظة:* \`${entryOfPortfolio.toFixed(2)}%\`\n\n` +
+                    `📊 **التأثير على المحفظة:**\n` +
+                    `   ▫️ *نسبة استهلاك الكاش:* \`${cashConsumptionPercent.toFixed(2)}%\`\n` +
+                    `   ▫️ *الوزن الجديد للعملة:* \`${portfolioPercentage.toFixed(2)}%\`\n\n` +
+                    `*بتاريخ: ${new Date().toLocaleDateString("de-DE")}*`;
+            } else { // It's a SELL
+                publicChannelPostText = `🔔 **توصية: ${recommendationType}**\n\n` +
+                    `🔸 **الأصل:** \`${asset}/USDT\`\n\n` +
+                    `📝 **تفاصيل الخروج:**\n` +
+                    `   ▫️ *سعر البيع:* \`$${price.toFixed(4)}\`\n` +
+                    `   ▫️ *قيمة الصفقة:* \`$${tradeValue.toFixed(2)}\`\n\n` +
+                    `📊 **التأثير على المحفظة:**\n` +
+                    `   ▫️ *الوزن الجديد للعملة:* \`${portfolioPercentage.toFixed(2)}%\`\n` +
+                    `   ▫️ *نسبة الكاش الجديدة:* \`${newCashPercentage.toFixed(2)}%\`\n\n` +
+                    `*بتاريخ: ${new Date().toLocaleDateString("de-DE")}*`;
             }
             
+            // --- Sending Logic ---
             const settings = await loadSettings();
             if (settings.autoPostToChannel) {
-                try {
-                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicChannelPostText, { parse_mode: "Markdown" });
+                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicChannelPostText, { parse_mode: "Markdown" });
+                // Also send the detailed private message, but only if it's NOT a full close (to avoid duplicate messages)
+                if (!retrospectiveReport) {
                     await bot.api.sendMessage(AUTHORIZED_USER_ID, privateTradeAnalysisText, { parse_mode: "Markdown" });
-                } catch (e) {
-                    console.error("Failed to auto-post to channel:", e);
-                    await bot.api.sendMessage(AUTHORIZED_USER_ID, "❌ فشل النشر التلقائي في القناة. يرجى التحقق من صلاحيات البوت.", { parse_mode: "Markdown" });
                 }
-            } else {
+            } else { // Manual Post
                 const hiddenMarker = `\n<CHANNEL_POST>${JSON.stringify(publicChannelPostText)}</CHANNEL_POST>`;
                 const confirmationKeyboard = new InlineKeyboard()
                     .text("✅ تأكيد ونشر في القناة", "publish_trade")
                     .text("❌ تجاهل الصفقة", "ignore_trade");
 
+                // If it's a full close, show the retrospective report with the buttons. Otherwise, show the trade analysis.
+                const textToSend = retrospectiveReport ? retrospectiveReport : privateTradeAnalysisText;
                 await bot.api.sendMessage(
                     AUTHORIZED_USER_ID,
-                    `*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n${privateTradeAnalysisText}${hiddenMarker}`,
+                    `*تم اكتشاف صفقة جديدة، هل تود نشرها؟*\n\n${textToSend}${hiddenMarker}`,
                     { parse_mode: "Markdown", reply_markup: confirmationKeyboard }
                 );
             }
@@ -526,7 +533,7 @@ async function monitorBalanceChanges() {
     }
 }
 // =================================================================
-// END: MODIFIED monitorBalanceChanges FUNCTION
+// END: THE ONLY MODIFIED FUNCTION
 // =================================================================
 
 async function checkPriceAlerts() {
@@ -787,16 +794,11 @@ bot.on("callback_query:data", async (ctx) => {
             return;
         }
 
-        // =================================================================
-        // START: MODIFIED 'publish_trade' HANDLER
-        // =================================================================
         if (data.startsWith("publish_")) {
             const originalText = ctx.callbackQuery.message.text;
             const markerStart = originalText.indexOf("<CHANNEL_POST>");
             const markerEnd = originalText.indexOf("</CHANNEL_POST>");
-            
-            let messageForChannel = "حدث خطأ في استخلاص نص التوصية."; // Fallback message
-
+            let messageForChannel = "حدث خطأ في استخلاص نص التوصية.";
             if (markerStart !== -1 && markerEnd !== -1) {
                 const jsonString = originalText.substring(markerStart + 14, markerEnd);
                 try {
@@ -817,9 +819,6 @@ bot.on("callback_query:data", async (ctx) => {
             }
             return;
         }
-        // =================================================================
-        // END: MODIFIED 'publish_trade' HANDLER
-        // =================================================================
         if (data === "ignore_trade") { await ctx.editMessageText("❌ تم تجاهل الصفقة ولن يتم نشرها.", { reply_markup: undefined }); return; }
 
         switch (data) {
