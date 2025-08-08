@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v66 (FINAL & TRULY COMPLETE)
+// OKX Advanced Analytics Bot - v66 (FORTIFICATION - STEP 1: DB SAFETY)
 // =================================================================
 
 const express = require("express");
@@ -19,7 +19,9 @@ const API_BASE_URL = "https://www.okx.com";
 // --- State Variables ---
 let waitingState = null;
 
-// === Database Functions ===
+// =================================================================
+// START: FORTIFIED DATABASE FUNCTIONS
+// =================================================================
 const getCollection = (collectionName) => getDB().collection(collectionName);
 
 async function getConfig(id, defaultValue = {}) {
@@ -28,7 +30,7 @@ async function getConfig(id, defaultValue = {}) {
         return doc ? doc.data : defaultValue;
     } catch (e) {
         console.error(`Error in getConfig for id: ${id}`, e);
-        return defaultValue;
+        return defaultValue; // Return default value on error
     }
 }
 
@@ -66,6 +68,10 @@ const loadAlertSettings = async () => await getConfig("alertSettings", { global:
 const saveAlertSettings = (settings) => saveConfig("alertSettings", settings);
 const loadPriceTracker = async () => await getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
 const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
+// =================================================================
+// END: FORTIFIED DATABASE FUNCTIONS
+// =================================================================
+
 
 // === Helper & API Functions ===
 function formatNumber(num, decimals = 2) {
@@ -754,7 +760,7 @@ bot.use(async (ctx, next) => {
 });
 
 bot.command("start", async (ctx) => {
-    await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v66 - STABLE*\n\nأهلاً بك! أنا هنا لمساعدتك في تتبع وتحليل محفظتك الاستثمارية.`, { parse_mode: "Markdown", reply_markup: mainKeyboard });
+    await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v65 - STABLE*\n\nأهلاً بك! أنا هنا لمساعدتك في تتبع وتحليل محفظتك الاستثمارية.`, { parse_mode: "Markdown", reply_markup: mainKeyboard });
 });
 
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
@@ -923,9 +929,10 @@ bot.on("message:text", async (ctx) => {
 });
 
 // === Healthcheck endpoint for hosting platforms ===
-app.get("/", (req, res) => {
-    res.status(200).send("OK - Bot is healthy.");
+app.get("/healthcheck", (req, res) => {
+    res.status(200).send("OK");
 });
+
 // === Start Bot ===
 async function startBot() {
     try {
@@ -940,10 +947,8 @@ async function startBot() {
 
         if (process.env.NODE_ENV === "production") {
             app.use(express.json());
-            app.use(`/${process.env.TELEGRAM_BOT_TOKEN}`, webhookCallback(bot, 'express'));
-            app.listen(process.env.PORT || 3000, () => {
-                console.log(`Server listening on port ${process.env.PORT || 3000}`);
-            });
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server on port ${PORT}`));
         } else {
             await bot.start();
             console.log("Bot started with polling.");
