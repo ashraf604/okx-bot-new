@@ -385,7 +385,7 @@ async function startBot() {
     try {
         await connectDB();
         console.log("MongoDB connected.");
-
+console.log("Environment variables seen by bot:", process.env);
         // NOTE: Timers are now managed to prevent memory leaks on restarts
         const intervals = [];
         intervals.push(setInterval(monitorBalanceChanges, 60000));
