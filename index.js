@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v80 (The Definitive, All-Features-Restored Version)
+// OKX Advanced Analytics Bot - v81 (Definitive, All-Features-Restored Version)
 // =================================================================
 
 const express = require("express");
@@ -409,7 +409,7 @@ async function formatPortfolioMsg(assets, total, capital) {
 }
 
 // =================================================================
-// SECTION 4: BACKGROUND JOBS (CRON TASKS)
+// SECTION 4: BACKGROUND JOBS (DEFINED BEFORE STARTBOT)
 // =================================================================
 
 async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmount) {
@@ -622,7 +622,7 @@ bot.command("pnl", async (ctx) => {
     const investment = buyPrice * quantity;
     const saleValue = sellPrice * quantity;
     const pnl = saleValue - investment;
-    const pnlPercent = (pnl / investment) * 100;
+    const pnlPercent = (investment > 0) ? (pnl / investment) * 100 : 0;
     const status = pnl >= 0 ? "ربح ✅" : "خسارة 🔻";
     const sign = pnl >= 0 ? '+' : '';
     const msg = `🧮 *نتيجة حساب الربح والخسارة*\n\n` +
@@ -806,4 +806,81 @@ bot.on("message:text", async (ctx) => {
 
     switch (text) {
         case "📊 عرض المحفظة":
-            await ctx
+            await ctx.reply("⏳ جاري إعداد التقرير...");
+            const { assets, total, capital, error } = await fetchPortfolioData();
+            if (error) return await ctx.reply(error);
+            const msgPortfolio = await formatPortfolioMsg(assets, total, capital);
+            await ctx.reply(msgPortfolio, { parse_mode: "Markdown" });
+            break;
+        case "🚀 تحليل السوق":
+            await ctx.reply("⏳ جاري تحليل السوق...");
+            const marketMsg = await formatAdvancedMarketAnalysis();
+            await ctx.reply(marketMsg, { parse_mode: "Markdown" });
+            break;
+        case "🏆 أفضل 5 أصول":
+            await ctx.reply("⏳ جاري تحليل الأصول...");
+            const { assets: topAssets, error: topAssetsError } = await fetchPortfolioData();
+            if (topAssetsError) return await ctx.reply(topAssetsError);
+            const topAssetsMsg = await formatTop5Assets(topAssets);
+            await ctx.reply(topAssetsMsg, { parse_mode: "Markdown" });
+            break;
+        case "⚡ إحصائيات سريعة":
+            await ctx.reply("⏳ جاري حساب الإحصائيات...");
+            const { assets: quickAssets, total: quickTotal, capital: quickCapital, error: quickError } = await fetchPortfolioData();
+            if (quickError) return await ctx.reply(quickError);
+            const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, quickCapital);
+            await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
+            break;
+        case "📈 أداء المحفظة":
+            const performanceKeyboard = new InlineKeyboard().text("آخر 24 ساعة", "chart_24h").row().text("آخر 7 أيام", "chart_7d").row().text("آخر 30 يومًا", "chart_30d");
+            await ctx.reply("اختر الفترة الزمنية لعرض تقرير الأداء:", { reply_markup: performanceKeyboard });
+            break;
+        case "ℹ️ معلومات عملة":
+            waitingState = 'coin_info';
+            await ctx.reply("✍️ يرجى إرسال رمز العملة (مثال: `BTC-USDT`).");
+            break;
+        case "⚙️ الإعدادات":
+            await sendSettingsMenu(ctx);
+            break;
+        case "🔔 ضبط تنبيه":
+            waitingState = 'set_alert';
+            await ctx.reply("✍️ *لضبط تنبيه سعر، استخدم الصيغة:*\n`BTC > 50000`", { parse_mode: "Markdown" });
+            break;
+        case "🧮 حاسبة الربح والخسارة":
+            await ctx.reply("✍️ لحساب الربح/الخسارة، استخدم أمر `/pnl` بالصيغة التالية:\n`/pnl <سعر الشراء> <سعر البيع> <الكمية>`", {parse_mode: "Markdown"});
+            break;
+    }
+});
+
+// =================================================================
+// SECTION 6: SERVER AND BOT INITIALIZATION
+// =================================================================
+
+app.get("/healthcheck", (req, res) => res.status(200).send("OK"));
+
+async function startBot() {
+    try {
+        await connectDB();
+        console.log("MongoDB connected.");
+
+        // Schedule background jobs
+        setInterval(monitorBalanceChanges, 60_000);
+        setInterval(checkPriceAlerts, 30_000);
+        setInterval(runHourlyJobs, 3_600_000);
+        setInterval(runDailyJobs, 86_400_000);
+
+        if (process.env.NODE_ENV === "production") {
+            app.use(express.json());
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+        } else {
+            await bot.start();
+            console.log("Bot started with polling.");
+        }
+    } catch (e) {
+        console.error("FATAL: Could not start the bot.", e);
+    }
+}
+
+// Start the bot after all functions are defined
+startBot();
