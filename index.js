@@ -1089,8 +1089,8 @@ bot.on("message:text", async (ctx) => {
 });
 
 // === Healthcheck endpoint for hosting platforms ===
-app.get("/", (req, res) => {
-    res.status(200).send("OK - Bot is healthy.");
+app.get("/healthcheck", (req, res) => {
+    res.status(200).send("OK");
 });
 
 // === Start Bot ===
@@ -1107,10 +1107,8 @@ async function startBot() {
 
         if (process.env.NODE_ENV === "production") {
             app.use(express.json());
-            app.use(`/${process.env.TELEGRAM_BOT_TOKEN}`, webhookCallback(bot, 'express'));
-            app.listen(process.env.PORT || 3000, () => {
-                console.log(`Server listening on port ${process.env.PORT || 3000}`);
-            });
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server on port ${PORT}`));
         } else {
             await bot.start();
             console.log("Bot started with polling.");
