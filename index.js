@@ -3,31 +3,28 @@
 // =================================================================
 
 const express = require("express");
-const { Bot, webhookCallback } = require("grammy");
+const { webhookCallback } = require("grammy");
 require("dotenv").config();
 
 const { connectDB } = require("./database.js");
+const { bot } = require("./botInstance.js");
 const { initializeHandlers } = require("./bot/handlers.js");
 const { startBackgroundTasks } = require("./bot/tasks.js");
 
 const app = express();
-const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
 const PORT = process.env.PORT || 3000;
-
-// Export the bot instance so other files can use it (e.g., for sending messages)
-module.exports = { bot };
 
 async function startBot() {
     try {
         await connectDB();
         
-        initializeHandlers();    // Activate all bot commands and message replies
-        startBackgroundTasks(); // Start all background monitoring tasks
+        initializeHandlers();    // تفعيل كل الأوامر والردود
+        startBackgroundTasks(); // بدء كل مهام المراقبة في الخلفية
 
         if (process.env.NODE_ENV === "production") {
             app.use(express.json());
             
-            // Healthcheck endpoint for Railway
+            // Endpoint for Railway's health checks
             app.get("/", (req, res) => {
                 res.status(200).send("OK - Bot is healthy.");
             });
