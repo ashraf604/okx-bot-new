@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v74 (FINAL & VERIFIED COMPLETE)
+// OKX Advanced Analytics Bot - v76 (Based on user's stable v66 + Feature 2)
 // =================================================================
 
 const express = require("express");
@@ -855,7 +855,7 @@ bot.use(async (ctx, next) => {
 });
 
 bot.command("start", async (ctx) => {
-    await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v74 - FINAL STABLE*\n\nأهلاً بك! أنا هنا لمساعدتك في تتبع وتحليل محفظتك الاستثمارية.`, { parse_mode: "Markdown", reply_markup: mainKeyboard });
+    await ctx.reply(`🤖 *بوت OKX التحليلي المتكامل*\n*الإصدار: v75 - FINAL*\n\nأهلاً بك! أنا هنا لمساعدتك في تتبع وتحليل محفظتك الاستثمارية.`, { parse_mode: "Markdown", reply_markup: mainKeyboard });
 });
 
 bot.command("settings", async (ctx) => await sendSettingsMenu(ctx));
