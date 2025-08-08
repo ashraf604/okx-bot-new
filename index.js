@@ -947,8 +947,18 @@ async function startBot() {
 
         if (process.env.NODE_ENV === "production") {
             app.use(express.json());
-            app.use(webhookCallback(bot, "express"));
-            app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+
+            // 1. الاستجابة لفحص الصحة الخاص بالمنصة على المسار الرئيسي
+            app.get("/", (req, res) => {
+                res.status(200).send("OK - Bot is healthy.");
+            });
+
+            // 2. استقبال رسائل تيليجرام على المسار السري الخاص بالتوكن
+            app.use(`/${process.env.TELEGRAM_BOT_TOKEN}`, webhookCallback(bot, 'express'));
+
+            app.listen(process.env.PORT || 3000, () => {
+                console.log(`Server listening on port ${process.env.PORT || 3000}`);
+            });
         } else {
             await bot.start();
             console.log("Bot started with polling.");
