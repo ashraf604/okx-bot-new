@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v65 (STABLE & COMPLETE)
+// OKX Advanced Analytics Bot - v66 (FORTIFICATION - STEP 1: DB SAFETY)
 // =================================================================
 
 const express = require("express");
@@ -19,40 +19,59 @@ const API_BASE_URL = "https://www.okx.com";
 // --- State Variables ---
 let waitingState = null;
 
-// === Database Functions ===
+// =================================================================
+// START: FORTIFIED DATABASE FUNCTIONS
+// =================================================================
 const getCollection = (collectionName) => getDB().collection(collectionName);
 
 async function getConfig(id, defaultValue = {}) {
-    const doc = await getCollection("configs").findOne({ _id: id });
-    return doc ? doc.data : defaultValue;
+    try {
+        const doc = await getCollection("configs").findOne({ _id: id });
+        return doc ? doc.data : defaultValue;
+    } catch (e) {
+        console.error(`Error in getConfig for id: ${id}`, e);
+        return defaultValue; // Return default value on error
+    }
 }
 
 async function saveConfig(id, data) {
-    await getCollection("configs").updateOne({ _id: id }, { $set: { data: data } }, { upsert: true });
+    try {
+        await getCollection("configs").updateOne({ _id: id }, { $set: { data: data } }, { upsert: true });
+    } catch (e) {
+        console.error(`Error in saveConfig for id: ${id}`, e);
+    }
 }
 
 async function saveClosedTrade(tradeData) {
-    await getCollection("tradeHistory").insertOne(tradeData);
+    try {
+        await getCollection("tradeHistory").insertOne(tradeData);
+    } catch (e) {
+        console.error("Error in saveClosedTrade:", e);
+    }
 }
 
 const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
 const saveCapital = (amount) => saveConfig("capital", { value: amount });
-const loadSettings = () => getConfig("settings", { dailySummary: true, autoPostToChannel: false, debugMode: false });
+const loadSettings = async () => await getConfig("settings", { dailySummary: true, autoPostToChannel: false, debugMode: false });
 const saveSettings = (settings) => saveConfig("settings", settings);
-const loadPositions = () => getConfig("positions", {});
+const loadPositions = async () => await getConfig("positions", {});
 const savePositions = (positions) => saveConfig("positions", positions);
-const loadHistory = () => getConfig("dailyHistory", []);
+const loadHistory = async () => await getConfig("dailyHistory", []);
 const saveHistory = (history) => saveConfig("dailyHistory", history);
-const loadHourlyHistory = () => getConfig("hourlyHistory", []);
+const loadHourlyHistory = async () => await getConfig("hourlyHistory", []);
 const saveHourlyHistory = (history) => saveConfig("hourlyHistory", history);
-const loadBalanceState = () => getConfig("balanceState", {});
+const loadBalanceState = async () => await getConfig("balanceState", {});
 const saveBalanceState = (state) => saveConfig("balanceState", state);
-const loadAlerts = () => getConfig("priceAlerts", []);
+const loadAlerts = async () => await getConfig("priceAlerts", []);
 const saveAlerts = (alerts) => saveConfig("priceAlerts", alerts);
-const loadAlertSettings = () => getConfig("alertSettings", { global: 5, overrides: {} });
+const loadAlertSettings = async () => await getConfig("alertSettings", { global: 5, overrides: {} });
 const saveAlertSettings = (settings) => saveConfig("alertSettings", settings);
-const loadPriceTracker = () => getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
+const loadPriceTracker = async () => await getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
 const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
+// =================================================================
+// END: FORTIFIED DATABASE FUNCTIONS
+// =================================================================
+
 
 // === Helper & API Functions ===
 function formatNumber(num, decimals = 2) {
@@ -513,8 +532,6 @@ async function monitorBalanceChanges() {
             if (previousState.totalValue !== newTotalPortfolioValue) {
                 await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
                 await sendDebugMessage(`State updated due to portfolio value change.`);
-            } else {
-                await sendDebugMessage("لا توجد تغييرات في الأرصدة أو القيمة.");
             }
         }
     } catch (e) {
