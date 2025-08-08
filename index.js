@@ -923,10 +923,9 @@ bot.on("message:text", async (ctx) => {
 });
 
 // === Healthcheck endpoint for hosting platforms ===
-app.get("/healthcheck", (req, res) => {
-    res.status(200).send("OK");
+app.get("/", (req, res) => {
+    res.status(200).send("OK - Bot is healthy.");
 });
-
 // === Start Bot ===
 async function startBot() {
     try {
