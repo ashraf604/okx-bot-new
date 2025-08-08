@@ -246,23 +246,33 @@ async function formatPortfolioMsg(assets, total, capital) {
 
 // ... (rest of code unchanged: monitorBalanceChanges, alerts, charts, commands etc.)
 
-// Healthcheck
-app.get("/healthcheck", (_req, res) => res.status(200).send("OK"));
+// === Healthcheck endpoint for hosting platforms ===
+app.get("/healthcheck", (req, res) => {
+    res.status(200).send("OK");
+});
 
+// === Start Bot ===
 async function startBot() {
-    await connectDB();
-    setInterval(monitorBalanceChanges, 60000);
-    setInterval(checkPriceAlerts, 30000);
-    setInterval(runHourlyJobs, 3600000);
-    setInterval(runDailyJobs, 86400000);
+    try {
+        await connectDB();
+        console.log("MongoDB connected.");
 
-    if (process.env.NODE_ENV === "production") {
-        app.use(express.json());
-        app.use(webhookCallback(bot, "express"));
-        app.listen(PORT, () => console.log(`Server on port ${PORT}`));
-    } else {
-        await bot.start();
-        console.log("Bot started with polling.");
+        setInterval(monitorBalanceChanges, 60000);
+        setInterval(checkPriceAlerts, 30000);
+        setInterval(checkPriceMovements, 60000);
+        setInterval(runHourlyJobs, 3600000);
+        setInterval(runDailyJobs, 86400000);
+
+        if (process.env.NODE_ENV === "production") {
+            app.use(express.json());
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+        } else {
+            await bot.start();
+            console.log("Bot started with polling.");
+        }
+    } catch (e) {
+        console.error("FATAL: Could not start the bot.", e);
     }
 }
 
