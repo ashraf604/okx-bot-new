@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v70 (FEATURE COMPLETE & STABLE)
+// OKX Advanced Analytics Bot - v71 (FINAL, FEATURE-COMPLETE & STABLE)
 // =================================================================
 
 const express = require("express");
@@ -79,7 +79,6 @@ async function getHistoricalPerformance(asset) {
         return null;
     }
 }
-
 
 const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
 const saveCapital = (amount) => saveConfig("capital", { value: amount });
@@ -321,8 +320,8 @@ function calculateRSI(closes, period = 14) {
 
 async function getTechnicalAnalysis(instId) {
     const closes = await getHistoricalCandles(instId, 51);
-    if (closes.length === 0) {
-        return { error: "تعذر جلب البيانات الفنية." };
+    if (closes.length < 51) {
+        return { error: "بيانات الشموع غير كافية للتحليل الفني." };
     }
 
     const rsi = calculateRSI(closes);
@@ -536,7 +535,7 @@ async function monitorBalanceChanges() {
     try {
         await sendDebugMessage("بدء دورة التحقق من الصفقات...");
         const previousState = await loadBalanceState();
-        const previousBalanceState = previousState.balances || {};
+        const previousBalances = previousState.balances || {};
         
         const currentBalance = await getBalanceForComparison();
         if (!currentBalance) { return; }
@@ -547,18 +546,17 @@ async function monitorBalanceChanges() {
         const { assets: currentAssets, total: newTotalPortfolioValue } = await getPortfolio(prices);
         if (newTotalPortfolioValue === undefined) { return; }
 
-        if (Object.keys(previousBalanceState).length === 0) {
+        if (Object.keys(previousBalances).length === 0) {
             await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
-            await sendDebugMessage("تم تسجيل الرصيد الأولي وحفظه.");
             return;
         }
 
-        const allAssets = new Set([...Object.keys(previousBalanceState), ...Object.keys(currentBalance)]);
+        const allAssets = new Set([...Object.keys(previousBalances), ...Object.keys(currentBalance)]);
         let stateNeedsUpdate = false;
 
         for (const asset of allAssets) {
             if (asset === 'USDT') continue;
-            const prevAmount = previousBalanceState[asset] || 0;
+            const prevAmount = previousBalances[asset] || 0;
             const currAmount = currentBalance[asset] || 0;
             const difference = currAmount - prevAmount;
 
@@ -591,10 +589,8 @@ async function monitorBalanceChanges() {
             const currentPosition = updatedPositions[asset];
             
             const tradeValue = Math.abs(difference) * price;
-            const newAssetValue = currAmount * price;
-            const portfolioPercentage = newTotalPortfolioValue > 0 ? (newAssetValue / newTotalPortfolioValue) * 100 : 0;
-            const usdtAsset = currentAssets.find(a => a.asset === 'USDT') || { value: 0 };
-            const newCashValue = usdtAsset.value;
+            const portfolioPercentage = newTotalPortfolioValue > 0 ? (currAmount * price / newTotalPortfolioValue) * 100 : 0;
+            const newCashValue = (currentAssets.find(a => a.asset === 'USDT') || { value: 0 }).value;
             const newCashPercentage = newTotalPortfolioValue > 0 ? (newCashValue / newTotalPortfolioValue) * 100 : 0;
             const entryOfPortfolio = previousState.totalValue > 0 ? (tradeValue / previousState.totalValue) * 100 : 0;
             
@@ -605,7 +601,7 @@ async function monitorBalanceChanges() {
             
             let publicChannelPostText;
             if (difference > 0) {
-                const initialCash = previousBalanceState['USDT'] || 0;
+                const initialCash = previousBalances['USDT'] || 0;
                 const cashConsumptionPercent = initialCash > 0 ? (tradeValue / initialCash) * 100 : 0;
                 const averageBuyPrice = currentPosition ? currentPosition.avgBuyPrice : price; 
                 publicChannelPostText = `🔔 **توصية: ${recommendationType}**\n\n` + `🔸 **الأصل:** \`${asset}/USDT\`\n\n` + `📝 **تفاصيل الدخول:**\n` + `   ▫️ *متوسط سعر الشراء:* \`$${formatNumber(averageBuyPrice, 4)}\`\n` + `   ▫️ *حجم الدخول من المحفظة:* \`${formatNumber(entryOfPortfolio)}%\`\n\n` + `📊 **التأثير على المحفظة:**\n` + `   ▫️ *نسبة استهلاك الكاش:* \`${formatNumber(cashConsumptionPercent)}%\`\n` + `   ▫️ *الوزن الجديد للعملة:* \`${formatNumber(portfolioPercentage)}%\`\n\n` + `*بتاريخ: ${new Date().toLocaleDateString("de-DE")}*`;
@@ -969,7 +965,7 @@ bot.on("message:text", async (ctx) => {
             case "📊 عرض المحفظة":
                 await ctx.reply("⏳ لحظات... جاري إعداد تقرير المحفظة.");
                 const pricesPortfolio = await getMarketPrices();
-                if (!pricesPortfolio) { return await ctx.reply("❌ عذرًا، فشل في جلب أسعار السوق من OKX حاليًا (استجابة غير صالحة). يرجى المحاولة مرة أخرى لاحقًا."); }
+                if (!pricesPortfolio) { return await ctx.reply("❌ عذرًا، فشل في جلب أسعار السوق من OKX حاليًا."); }
                 const capital = await loadCapital();
                 const { assets, total, error } = await getPortfolio(pricesPortfolio);
                 if (error) { return await ctx.reply(`❌ ${error}`); }
