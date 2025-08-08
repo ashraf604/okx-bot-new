@@ -1,7 +1,7 @@
 // utils/helpers.js
-
-const { bot } = require("../index.js");
-const { loadSettings } = require("../database.js");
+const { bot } = require("../botInstance.js");
+const db = require("../database.js");
+const { getConfig } = require("../bot/db_logic.js");
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 
 function formatNumber(num, decimals = 2) {
@@ -13,7 +13,7 @@ function formatNumber(num, decimals = 2) {
 }
 
 async function sendDebugMessage(message) {
-    const settings = await loadSettings();
+    const settings = await getConfig("settings", { dailySummary: true, autoPostToChannel: false, debugMode: false });
     if (settings.debugMode) {
         try {
             await bot.api.sendMessage(AUTHORIZED_USER_ID, `🐞 *Debug:* ${message}`, { parse_mode: "Markdown" });
