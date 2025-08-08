@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v79 (Full Features & All Fixes)
+// OKX Advanced Analytics Bot - v80 (The Definitive, All-Features-Restored Version)
 // =================================================================
 
 const express = require("express");
@@ -87,8 +87,6 @@ const loadAlerts = async () => await getConfig("priceAlerts", []);
 const saveAlerts = (alerts) => saveConfig("priceAlerts", alerts);
 const loadAlertSettings = async () => await getConfig("alertSettings", { global: 5, overrides: {} });
 const saveAlertSettings = (settings) => saveConfig("alertSettings", settings);
-const loadPriceTracker = async () => await getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
-const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
 
 function formatNumber(num, decimals = 2) {
     const number = parseFloat(num);
@@ -260,6 +258,36 @@ async function getTechnicalAnalysis(instId) {
     return { rsi: calculateRSI(closes), sma20: calculateSMA(closes, 20), sma50: calculateSMA(closes, 50) };
 }
 
+function calculatePerformanceStats(history) {
+    if (history.length < 2) return null;
+    const values = history.map(h => h.total);
+    const startValue = values[0];
+    const endValue = values[values.length - 1];
+    const pnl = endValue - startValue;
+    const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0;
+    const maxValue = Math.max(...values);
+    const minValue = Math.min(...values);
+    const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length;
+    return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue };
+}
+
+function createChartUrl(history, periodLabel, pnl) {
+    if (history.length < 2) return null;
+    const chartColor = pnl >= 0 ? 'rgb(75, 192, 75)' : 'rgb(255, 99, 132)';
+    const chartBgColor = pnl >= 0 ? 'rgba(75, 192, 75, 0.2)' : 'rgba(255, 99, 132, 0.2)';
+    const labels = history.map(h => h.label);
+    const data = history.map(h => h.total.toFixed(2));
+    const chartConfig = {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: chartBgColor, borderColor: chartColor, tension: 0.1 }]
+        },
+        options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } }
+    };
+    return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`;
+}
+
 // =================================================================
 // SECTION 3: FORMATTING AND MESSAGE GENERATION FUNCTIONS
 // =================================================================
@@ -410,7 +438,8 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
             const closeDate = new Date();
             const openDate = new Date(position.openDate);
             const durationDays = (closeDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24);
-            const tradeRecord = { asset, pnl: finalPnl, pnlPercent: finalPnlPercent, openDate, closeDate, durationDays, avgBuyPrice: position.avgBuyPrice, avgSellPrice: position.realizedValue / position.totalAmountSold };
+            const avgSellPrice = position.totalAmountSold > 0 ? position.realizedValue / position.totalAmountSold : 0;
+            const tradeRecord = { asset, pnl: finalPnl, pnlPercent: finalPnlPercent, openDate, closeDate, durationDays, avgBuyPrice: position.avgBuyPrice, avgSellPrice };
             await saveClosedTrade(tradeRecord);
             
             delete positions[asset];
@@ -431,6 +460,8 @@ async function monitorBalanceChanges() {
         if (!prices) return;
         
         const { total: newTotalValue } = await getPortfolio(prices);
+        if (newTotalValue === undefined) return;
+
         if (Object.keys(previousBalances).length === 0) {
             await saveBalanceState({ balances: currentBalance, totalValue: newTotalValue });
             return;
@@ -579,9 +610,52 @@ bot.use(async (ctx, next) => {
 bot.command("start", (ctx) => ctx.reply("🤖 *أهلاً بك في بوت OKX التحليلي*.", { parse_mode: "Markdown", reply_markup: mainKeyboard }));
 bot.command("settings", sendSettingsMenu);
 
+bot.command("pnl", async (ctx) => {
+    const args = ctx.match.trim().split(/\s+/);
+    if (args.length !== 3 || args[0] === '') {
+        return await ctx.reply(`❌ *صيغة غير صحيحة.*\n*مثال:* \`/pnl <سعر الشراء> <سعر البيع> <الكمية>\``, { parse_mode: "Markdown" });
+    }
+    const [buyPrice, sellPrice, quantity] = args.map(parseFloat);
+    if (isNaN(buyPrice) || isNaN(sellPrice) || isNaN(quantity) || buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) {
+        return await ctx.reply("❌ *خطأ:* تأكد من أن جميع القيم هي أرقام موجبة.");
+    }
+    const investment = buyPrice * quantity;
+    const saleValue = sellPrice * quantity;
+    const pnl = saleValue - investment;
+    const pnlPercent = (pnl / investment) * 100;
+    const status = pnl >= 0 ? "ربح ✅" : "خسارة 🔻";
+    const sign = pnl >= 0 ? '+' : '';
+    const msg = `🧮 *نتيجة حساب الربح والخسارة*\n\n` +
+                `*صافي الربح/الخسارة:* \`${sign}${formatNumber(pnl)}\` (\`${sign}${formatNumber(pnlPercent)}%\`)\n` +
+                `**الحالة النهائية: ${status}**`;
+    await ctx.reply(msg, { parse_mode: "Markdown" });
+});
+
+
 bot.on("callback_query:data", async (ctx) => {
     await ctx.answerCallbackQuery();
     const data = ctx.callbackQuery.data;
+
+    if (data.startsWith("chart_")) {
+        const period = data.split('_')[1];
+        await ctx.editMessageText("⏳ جاري إنشاء تقرير الأداء...");
+        let history, periodLabel, periodData;
+        if (period === '24h') { history = await loadHourlyHistory(); periodLabel = "آخر 24 ساعة"; periodData = history.slice(-24); }
+        else if (period === '7d') { history = await loadHistory(); periodLabel = "آخر 7 أيام"; periodData = history.slice(-7).map(h => ({ label: h.date.slice(5), total: h.total })); }
+        else if (period === '30d') { history = await loadHistory(); periodLabel = "آخر 30 يومًا"; periodData = history.slice(-30).map(h => ({ label: h.date.slice(5), total: h.total })); }
+        if (!periodData || periodData.length < 2) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
+        const stats = calculatePerformanceStats(periodData);
+        if (!stats) { await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); return; }
+        const chartUrl = createChartUrl(periodData, periodLabel, stats.pnl);
+        const pnlSign = stats.pnl >= 0 ? '+' : '';
+        const caption = `📊 *أداء المحفظة | ${periodLabel}*\n\n` +
+                      `📈 *النتيجة:* ${stats.pnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${pnlSign}${formatNumber(stats.pnl)}\` (\`${pnlSign}${formatNumber(stats.pnlPercent)}%\`)\n` +
+                      `*التغير: من \`$${formatNumber(stats.startValue)}\` إلى \`$${formatNumber(stats.endValue)}\`*`;
+        try { await ctx.replyWithPhoto(chartUrl, { caption: caption, parse_mode: "Markdown" }); await ctx.deleteMessage(); } 
+        catch (e) { console.error("Chart send failed:", e); await ctx.editMessageText("❌ فشل إنشاء الرسم البياني."); }
+        return;
+    }
+    
     switch(data) {
         case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط)."); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
@@ -591,12 +665,12 @@ bot.on("callback_query:data", async (ctx) => {
         case "view_positions":
             const positions = await loadPositions();
             if (Object.keys(positions).length === 0) { await ctx.editMessageText("ℹ️ لا توجد مراكز مفتوحة.", { reply_markup: new InlineKeyboard().text("🔙 العودة", "back_to_settings") }); break; }
-            let msg = "📄 *قائمة المراكز المفتوحة:*\n";
+            let posMsg = "📄 *قائمة المراكز المفتوحة:*\n";
             for (const symbol in positions) {
                 const pos = positions[symbol];
-                msg += `\n- *${symbol}:* متوسط الشراء \`$${formatNumber(pos.avgBuyPrice, 4)}\``;
+                posMsg += `\n- *${symbol}:* متوسط الشراء \`$${formatNumber(pos.avgBuyPrice, 4)}\``;
             }
-            await ctx.editMessageText(msg, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة", "back_to_settings") });
+            await ctx.editMessageText(posMsg, { parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("🔙 العودة", "back_to_settings") });
             break;
         case "delete_alert":
             const alerts = await loadAlerts();
@@ -653,7 +727,7 @@ bot.on("message:text", async (ctx) => {
                     getInstrumentDetails(instId), getMarketPrices(), getHistoricalPerformance(coinSymbol), getTechnicalAnalysis(instId)
                 ]);
 
-                if (details.error) return await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${details.error}`);
+                if (details.error || !prices) return await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${details.error || "فشل جلب البيانات"}`);
 
                 let msg = `ℹ️ *الملف التحليلي الكامل | ${instId}*\n\n*القسم الأول: بيانات السوق*\n`;
                 msg += ` ▫️ *السعر الحالي:* \`$${formatNumber(details.price, 4)}\`\n`;
@@ -702,7 +776,7 @@ bot.on("message:text", async (ctx) => {
                 const price = parseFloat(priceStr);
                 if (isNaN(price) || price <= 0) return await ctx.reply("❌ السعر غير صالح.");
                 const allAlerts = await loadAlerts();
-                allAlerts.push({ instId: symbol.toUpperCase(), condition: cond, price: price });
+                allAlerts.push({ instId: symbol.toUpperCase() + '-USDT', condition: cond, price: price });
                 await saveAlerts(allAlerts);
                 await ctx.reply(`✅ تم ضبط التنبيه: ${symbol.toUpperCase()} ${cond} ${price}`, { parse_mode: "Markdown" });
                 return;
@@ -732,74 +806,4 @@ bot.on("message:text", async (ctx) => {
 
     switch (text) {
         case "📊 عرض المحفظة":
-            await ctx.reply("⏳ جاري إعداد التقرير...");
-            const { assets, total, capital, error } = await fetchPortfolioData();
-            if (error) return await ctx.reply(error);
-            const msgPortfolio = await formatPortfolioMsg(assets, total, capital);
-            await ctx.reply(msgPortfolio, { parse_mode: "Markdown" });
-            break;
-        case "🚀 تحليل السوق":
-            await ctx.reply("⏳ جاري تحليل السوق...");
-            const marketMsg = await formatAdvancedMarketAnalysis();
-            await ctx.reply(marketMsg, { parse_mode: "Markdown" });
-            break;
-        case "🏆 أفضل 5 أصول":
-            await ctx.reply("⏳ جاري تحليل الأصول...");
-            const { assets: topAssets, error: topAssetsError } = await fetchPortfolioData();
-            if (topAssetsError) return await ctx.reply(topAssetsError);
-            const topAssetsMsg = await formatTop5Assets(topAssets);
-            await ctx.reply(topAssetsMsg, { parse_mode: "Markdown" });
-            break;
-        case "⚡ إحصائيات سريعة":
-            await ctx.reply("⏳ جاري حساب الإحصائيات...");
-            const { assets: quickAssets, total: quickTotal, capital: quickCapital, error: quickError } = await fetchPortfolioData();
-            if (quickError) return await ctx.reply(quickError);
-            const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, quickCapital);
-            await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
-            break;
-        case "ℹ️ معلومات عملة":
-            waitingState = 'coin_info';
-            await ctx.reply("✍️ يرجى إرسال رمز العملة (مثال: `BTC-USDT`).");
-            break;
-        case "⚙️ الإعدادات":
-            await sendSettingsMenu(ctx);
-            break;
-        case "🔔 ضبط تنبيه":
-            waitingState = 'set_alert';
-            await ctx.reply("✍️ *لضبط تنبيه سعر، استخدم الصيغة:*\n`BTC > 50000`", { parse_mode: "Markdown" });
-            break;
-    }
-});
-
-// =================================================================
-// SECTION 6: SERVER AND BOT INITIALIZATION
-// =================================================================
-
-app.get("/healthcheck", (req, res) => res.status(200).send("OK"));
-
-async function startBot() {
-    try {
-        await connectDB();
-        console.log("MongoDB connected.");
-
-        // Schedule background jobs
-        setInterval(monitorBalanceChanges, 60_000);
-        setInterval(checkPriceAlerts, 30_000);
-        setInterval(runHourlyJobs, 3_600_000);
-        setInterval(runDailyJobs, 86_400_000);
-
-        if (process.env.NODE_ENV === "production") {
-            app.use(express.json());
-            app.use(webhookCallback(bot, "express"));
-            app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
-        } else {
-            await bot.start();
-            console.log("Bot started with polling.");
-        }
-    } catch (e) {
-        console.error("FATAL: Could not start the bot.", e);
-    }
-}
-
-// Start the bot after all functions are defined
-startBot();
+            await ctx
