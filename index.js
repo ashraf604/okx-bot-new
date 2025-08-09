@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v100 (Final Approved Creative Messaging)
+// OKX Advanced Analytics Bot - v101 (Core Functionality Restoration)
 // =================================================================
 
 const express = require("express");
@@ -324,7 +324,7 @@ function createChartUrl(history, periodLabel, pnl) {
 }
 
 // =================================================================
-// SECTION 3: FORMATTING AND MESSAGE GENERATION FUNCTIONS (v100 APPROVED)
+// SECTION 3: FORMATTING AND MESSAGE GENERATION FUNCTIONS 
 // =================================================================
 
 // --- BOT (PRIVATE) MESSAGES ---
@@ -451,8 +451,108 @@ function formatPublicClose(details) {
     return msg;
 }
 
+// --- RESTORED CORE REPORTING FUNCTIONS ---
+
+async function formatPortfolioMsg(assets, total, capital) {
+    const positions = await loadPositions();
+    let dailyPnlText = " ▫️ *الأداء اليومي (24س):* `لا توجد بيانات كافية`\n";
+    let totalValue24hAgo = 0;
+    assets.forEach(asset => {
+        if (asset.asset === 'USDT') totalValue24hAgo += asset.value;
+        else if (asset.change24h !== undefined && asset.price > 0) totalValue24hAgo += asset.amount * (asset.price / (1 + asset.change24h));
+        else totalValue24hAgo += asset.value;
+    });
+
+    if (totalValue24hAgo > 0) {
+        const dailyPnl = total - totalValue24hAgo;
+        const dailyPnlPercent = (dailyPnl / totalValue24hAgo) * 100;
+        const sign = dailyPnl >= 0 ? '+' : '';
+        dailyPnlText = ` ▫️ *الأداء اليومي (24س):* ${dailyPnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${sign}${formatNumber(dailyPnl)}\` (\`${sign}${formatNumber(dailyPnlPercent)}%\`)\n`;
+    }
+
+    const pnl = capital > 0 ? total - capital : 0;
+    const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+    const pnlSign = pnl >= 0 ? '+' : '';
+    const usdtValue = (assets.find(a => a.asset === 'USDT') || { value: 0 }).value;
+    const cashPercent = total > 0 ? (usdtValue / total) * 100 : 0;
+    const liquidityText = ` ▫️ *السيولة:* 💵 نقدي ${formatNumber(cashPercent, 1)}% / 📈 مستثمر ${formatNumber(100 - cashPercent, 1)}%`;
+
+    let msg = `🧾 *التقرير التحليلي للمحفظة*\n\n`;
+    msg += `*بتاريخ: ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━\n*نظرة عامة على الأداء:*\n`;
+    msg += ` ▫️ *القيمة الإجمالية:* \`$${formatNumber(total)}\`\n`;
+    msg += ` ▫️ *رأس المال:* \`$${formatNumber(capital)}\`\n`;
+    msg += ` ▫️ *إجمالي الربح غير المحقق:* ${pnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${pnlSign}${formatNumber(pnl)}\` (\`${pnlSign}${formatNumber(pnlPercent)}%\`)\n`;
+    msg += dailyPnlText + liquidityText + `\n━━━━━━━━━━━━━━━━━━━━\n*مكونات المحفظة:*\n`;
+
+    assets.forEach((a, index) => {
+        const percent = total > 0 ? (a.value / total) * 100 : 0;
+        msg += "\n";
+        if (a.asset === "USDT") {
+            msg += `*USDT* (الرصيد النقدي) 💵\n*القيمة:* \`$${formatNumber(a.value)}\` (*الوزن:* \`${formatNumber(percent)}%\`)`;
+        } else {
+            const change24hPercent = (a.change24h || 0) * 100;
+            const changeEmoji = change24hPercent >= 0 ? '🟢⬆️' : '🔴⬇️';
+            const changeSign = change24hPercent >= 0 ? '+' : '';
+            msg += `╭─ *${a.asset}/USDT*\n`;
+            msg += `├─ *القيمة الحالية:* \`$${formatNumber(a.value)}\` (*الوزن:* \`${formatNumber(percent)}%\`)\n`;
+            msg += `├─ *سعر السوق:* \`$${formatNumber(a.price, 4)}\`\n`;
+            msg += `├─ *الأداء اليومي:* ${changeEmoji} \`${changeSign}${formatNumber(change24hPercent)}%\`\n`;
+            const position = positions[a.asset];
+            if (position?.avgBuyPrice > 0) {
+                const totalCost = position.avgBuyPrice * a.amount;
+                const assetPnl = a.value - totalCost;
+                const assetPnlPercent = totalCost > 0 ? (assetPnl / totalCost) * 100 : 0;
+                msg += `├─ *متوسط الشراء:* \`$${formatNumber(position.avgBuyPrice, 4)}\`\n`;
+                msg += `╰─ *ربح/خسارة غير محقق:* ${assetPnl >= 0 ? '🟢' : '🔴'} \`${assetPnl >= 0 ? '+' : ''}${formatNumber(assetPnl)}\` (\`${assetPnl >= 0 ? '+' : ''}${formatNumber(assetPnlPercent)}%\`)`;
+            } else {
+                msg += `╰─ *متوسط الشراء:* \`غير مسجل\``;
+            }
+        }
+        if (index < assets.length - 1) msg += `\n━━━━━━━━━━━━━━━━━━━━`;
+    });
+    return msg;
+}
+
+async function formatAdvancedMarketAnalysis() {
+    const prices = await getMarketPrices();
+    if (!prices) return "❌ فشل جلب بيانات السوق.";
+
+    const marketData = Object.entries(prices)
+        .map(([instId, data]) => ({ instId, ...data }))
+        .filter(d => d.volCcy24h > 10000 && d.change24h !== undefined);
+
+    marketData.sort((a, b) => b.change24h - a.change24h);
+    const topGainers = marketData.slice(0, 5);
+    const topLosers = marketData.slice(-5).reverse();
+
+    marketData.sort((a, b) => b.volCcy24h - a.volCcy24h);
+    const highVolume = marketData.slice(0, 5);
+    
+    let msg = `🚀 *تحليل السوق المتقدم* | ${new Date().toLocaleDateString("ar-EG")}\n━━━━━━━━━━━━━━━━━━━\n\n`;
+    msg += "📈 *أكبر الرابحين (24س):*\n" + topGainers.map(c => `  - \`${c.instId}\`: \`+${formatNumber(c.change24h * 100)}%\``).join('\n') + "\n\n";
+    msg += "📉 *أكبر الخاسرين (24س):*\n" + topLosers.map(c => `  - \`${c.instId}\`: \`${formatNumber(c.change24h * 100)}%\``).join('\n') + "\n\n";
+    msg += "📊 *الأعلى في حجم التداول:*\n" + highVolume.map(c => `  - \`${c.instId}\`: \`${(c.volCcy24h / 1e6).toFixed(2)}M\` USDT`).join('\n') + "\n\n";
+    msg += "💡 *توصية:* راقب الأصول ذات حجم التداول المرتفع، فهي غالبًا ما تقود اتجاه السوق.";
+    return msg;
+}
+
+async function formatQuickStats(assets, total, capital) {
+    const pnl = capital > 0 ? total - capital : 0;
+    const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
+    const statusEmoji = pnl >= 0 ? '🟢' : '🔴';
+    const statusText = pnl >= 0 ? 'ربح' : 'خسارة';
+    let msg = "⚡ *إحصائيات سريعة*\n\n";
+    msg += `💎 *إجمالي الأصول:* \`${assets.filter(a => a.asset !== 'USDT').length}\`\n`;
+    msg += `💰 *القيمة الحالية:* \`$${formatNumber(total)}\`\n`;
+    msg += `📈 *نسبة الربح/الخسارة:* \`${formatNumber(pnlPercent)}%\`\n`;
+    msg += `🎯 *الحالة:* ${statusEmoji} ${statusText}\n\n`;
+    msg += `⏰ *آخر تحديث:* ${new Date().toLocaleTimeString("ar-EG")}`;
+    return msg;
+}
+
 // =================================================================
-// SECTION 4: BACKGROUND JOBS (LOGIC REBUILT FOR V100 MESSAGING)
+// SECTION 4: BACKGROUND JOBS
 // =================================================================
 
 async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmount) {
@@ -508,7 +608,7 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
     }
     
     await savePositions(positions);
-    analysisResult.data.position = positions[asset] || position; // Pass the correct position state
+    analysisResult.data.position = positions[asset] || position; 
     return { analysisResult };
 }
 
@@ -843,7 +943,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v100 - Final Approved Creative Messaging*\n\n` +
+        `*الإصدار: v101 - Core Functionality Restoration*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -1199,6 +1299,7 @@ bot.on("message:text", async (ctx) => {
             await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
             break;
         case "📈 أداء المحفظة":
+            await ctx.reply("⏳ جاري إعداد التقرير...");
             const performanceKeyboard = new InlineKeyboard().text("آخر 24 ساعة", "chart_24h").row().text("آخر 7 أيام", "chart_7d").row().text("آخر 30 يومًا", "chart_30d");
             await ctx.reply("اختر الفترة الزمنية لعرض تقرير الأداء:", { reply_markup: performanceKeyboard });
             break;
@@ -1237,20 +1338,4 @@ async function startBot() {
         setInterval(trackPositionHighLow, 60_000);
         setInterval(monitorVirtualTrades, 30_000);
         setInterval(runHourlyJobs, 3_600_000);
-        setInterval(runDailyJobs, 86_400_000);
-
-        if (process.env.NODE_ENV === "production") {
-            app.use(express.json());
-            app.use(webhookCallback(bot, "express"));
-            app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
-        } else {
-            await bot.start();
-            console.log("Bot started with polling.");
-        }
-    } catch (e) {
-        console.error("FATAL: Could not start the bot.", e);
-        process.exit(1); 
-    }
-}
-
-startBot();
+        setInterval(runDailyJobs,
