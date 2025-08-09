@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v94 (Definitive Merge: Stable v83 + Virtual Trades)
+// OKX Advanced Analytics Bot - v96 (Definitive Merge: User's Stable v83 + Virtual Trades)
 // =================================================================
 
 const express = require("express");
@@ -71,7 +71,7 @@ async function getHistoricalPerformance(asset) {
     }
 }
 
-// --- NEW: Virtual Trade DB Functions ---
+// --- NEW: Virtual Trade DB Functions (added from v94, integrated into v83) ---
 async function saveVirtualTrade(tradeData) {
     try {
         const tradeWithId = { ...tradeData, _id: new crypto.randomBytes(16).toString("hex") };
@@ -98,6 +98,7 @@ async function updateVirtualTradeStatus(tradeId, status, finalPrice) {
         console.error(`Error updating virtual trade ${tradeId}:`, e);
     }
 }
+
 
 const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
 const saveCapital = (amount) => saveConfig("capital", { value: amount });
@@ -345,7 +346,7 @@ async function formatAdvancedMarketAnalysis() {
     return msg;
 }
 
-// This function is no longer used by a button but is kept for integrity
+// Kept this function from v83, although its direct button is replaced
 async function formatTop5Assets(assets) {
     if (!assets || assets.length === 0) return "ℹ️ لا توجد أصول في محفظتك لعرضها.";
 
@@ -469,7 +470,8 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
             const openDate = new Date(position.openDate);
             const durationDays = (closeDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24);
             const avgSellPrice = position.totalAmountSold > 0 ? position.realizedValue / position.totalAmountSold : 0;
-            await saveClosedTrade({ asset, pnl: finalPnl, pnlPercent, openDate, closeDate, durationDays, avgBuyPrice: position.avgBuyPrice, avgSellPrice });
+            const tradeRecord = { asset, pnl: finalPnl, pnlPercent: finalPnlPercent, openDate, closeDate, durationDays, avgBuyPrice: position.avgBuyPrice, avgSellPrice };
+            await saveClosedTrade(tradeRecord);
             
             delete positions[asset];
         }
@@ -511,7 +513,7 @@ async function monitorBalanceChanges() {
             const closeReport = await updatePositionAndAnalyze(asset, difference, priceData.price, currAmount);
             if (closeReport) {
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, closeReport, { parse_mode: "Markdown" });
-                const settings = await loadSettings();
+                 const settings = await loadSettings();
                 if (settings.autoPostToChannel) {
                     await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, closeReport, { parse_mode: "Markdown" });
                 } else {
@@ -648,7 +650,7 @@ async function runHourlyJobs() {
     }
 }
 
-// --- NEW: Background job for virtual trades ---
+// --- NEW: Background job for virtual trades (integrated from v94) ---
 async function monitorVirtualTrades() {
     const activeTrades = await getActiveVirtualTrades();
     if (activeTrades.length === 0) return;
@@ -666,7 +668,7 @@ async function monitorVirtualTrades() {
 
         if (currentPrice >= trade.targetPrice) {
             finalPrice = trade.targetPrice;
-            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
+            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Correct PNL calculation
             finalStatus = 'completed';
             const profitPercent = (pnl / trade.virtualAmount) * 100;
             const msg = `🎯 *الهدف تحقق (توصية افتراضية)!* ✅\n\n` +
@@ -678,7 +680,7 @@ async function monitorVirtualTrades() {
         }
         else if (currentPrice <= trade.stopLossPrice) {
             finalPrice = trade.stopLossPrice;
-            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
+            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Correct PNL calculation
             finalStatus = 'stopped';
             const lossPercent = (pnl / trade.virtualAmount) * 100;
             const msg = `🛑 *تم تفعيل وقف الخسارة (توصية افتراضية)!* 🔻\n\n` +
@@ -695,17 +697,20 @@ async function monitorVirtualTrades() {
     }
 }
 
+
 // =================================================================
 // SECTION 5: BOT SETUP, KEYBOARDS, AND HANDLERS
 // =================================================================
 
+// Modified mainKeyboard to replace "أفضل 5 أصول" with "توصية افتراضية"
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
-    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row()
+    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row() // Replaced "🏆 أفضل 5 أصول"
     .text("⚡ إحصائيات سريعة").text("ℹ️ معلومات عملة").row()
     .text("🔔 ضبط تنبيه").text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").resized();
 
+// NEW Keyboard for virtual trades (integrated from v94)
 const virtualTradeKeyboard = new InlineKeyboard()
     .text("➕ إضافة توصية جديدة", "add_virtual_trade").row()
     .text("📈 متابعة التوصيات الحية", "track_virtual_trades");
@@ -746,7 +751,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v94 - Definitive Merge*\n\n` +
+        `*الإصدار: v96 - Definitive Merge: Stable v83 + Virtual Trades*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -829,6 +834,7 @@ bot.on("callback_query:data", async (ctx) => {
     }
     
     switch(data) {
+        // --- NEW Virtual Trade Callbacks (integrated from v94) ---
         case "add_virtual_trade":
             waitingState = 'add_virtual_trade';
             await ctx.editMessageText(
@@ -857,13 +863,15 @@ bot.on("callback_query:data", async (ctx) => {
                 if (!currentPrice) {
                     reportMsg += `*${trade.instId}:* \`لا يمكن جلب السعر الحالي.\`\n`;
                 } else {
-                    const pnl = (currentPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
+                    const pnl = (currentPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Corrected PNL calculation
                     const pnlPercent = (pnl / trade.virtualAmount) * 100;
+                    const sign = pnl >= 0 ? '+' : '';
                     const emoji = pnl >= 0 ? '🟢' : '🔴';
+
                     reportMsg += `*${trade.instId}* ${emoji}\n` +
                                ` ▫️ *الدخول:* \`$${formatNumber(trade.entryPrice, 4)}\`\n` +
                                ` ▫️ *الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n` +
-                               ` ▫️ *ربح/خسارة:* \`${formatNumber(pnl)}\` (\`${formatNumber(pnlPercent)}%\`)\n` +
+                               ` ▫️ *ربح/خسارة:* \`${sign}${formatNumber(pnl)}\` (\`${sign}${formatNumber(pnlPercent)}%\`)\n` +
                                ` ▫️ *الهدف:* \`$${formatNumber(trade.targetPrice, 4)}\`\n` +
                                ` ▫️ *الوقف:* \`$${formatNumber(trade.stopLossPrice, 4)}\`\n`;
                 }
@@ -871,6 +879,8 @@ bot.on("callback_query:data", async (ctx) => {
             }
             await ctx.editMessageText(reportMsg, { parse_mode: "Markdown", reply_markup: virtualTradeKeyboard });
             break;
+
+        // --- Existing Settings Callbacks (from v83) ---
         case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط)."); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "manage_movement_alerts": await sendMovementAlertsMenu(ctx); break;
@@ -919,7 +929,7 @@ bot.on("message:text", async (ctx) => {
         const state = waitingState;
         waitingState = null;
         switch (state) {
-            case 'add_virtual_trade':
+            case 'add_virtual_trade': // Integrated from v94
                 try {
                     const lines = text.split('\n').map(line => line.trim());
                     if (lines.length < 5) throw new Error("التنسيق غير صحيح، يجب أن يتكون من 5 أسطر.");
@@ -947,6 +957,7 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`❌ *خطأ في إضافة التوصية:*\n${e.message}\n\nالرجاء المحاولة مرة أخرى بالتنسيق الصحيح.`);
                 }
                 return;
+            
             case 'set_capital':
                 const amount = parseFloat(text);
                 if (!isNaN(amount) && amount >= 0) {
@@ -981,7 +992,7 @@ bot.on("message:text", async (ctx) => {
             case 'confirm_delete_all':
                 if (text === 'تأكيد الحذف') {
                     await getCollection("configs").deleteMany({});
-                    await getCollection("virtualTrades").deleteMany({});
+                    await getCollection("virtualTrades").deleteMany({}); // Also delete virtual trades
                     await ctx.reply("✅ تم حذف جميع بياناتك.");
                 } else await ctx.reply("❌ تم إلغاء الحذف.");
                 return;
@@ -1011,7 +1022,7 @@ bot.on("message:text", async (ctx) => {
                     const pnlPercent = (assetPosition.avgBuyPrice > 0) ? (pnl / (assetPosition.avgBuyPrice * ownedAsset.amount)) * 100 : 0;
                     const durationDays = (new Date().getTime() - new Date(assetPosition.openDate).getTime()) / (1000 * 60 * 60 * 24);
                     msg += ` ▪️ *متوسط الشراء:* \`$${formatNumber(assetPosition.avgBuyPrice, 4)}\`\n`;
-                    msg += ` ▪️ *الربح/الخسارة غير المحقق:* ${pnl >= 0 ? '🟢' : '🔴'} \`${formatNumber(pnl)}\` (\`${formatNumber(pnlPercent)}%\`)\n`;
+                    msg += ` ▪️ *الربح/الخسارة غير المحقق:* ${pnl >= 0 ? '🟢' : '🔴'} \`${pnl >= 0 ? '+' : ''}${formatNumber(pnl)}\` (\`${pnl >= 0 ? '+' : ''}${formatNumber(pnlPercent)}%\`)\n`;
                     msg += ` ▪️ *مدة فتح المركز:* \`${formatNumber(durationDays, 1)} يوم\`\n\n`;
                 } else msg += ` ▪️ لا يوجد مركز مفتوح حالياً لهذه العملة.\n\n`;
 
@@ -1060,6 +1071,7 @@ bot.on("message:text", async (ctx) => {
     }
     
     let portfolioData;
+    // Helper function to fetch portfolio data once per interaction if needed multiple times
     const fetchPortfolioData = async () => {
         if (!portfolioData) {
             const prices = await getMarketPrices();
@@ -1084,7 +1096,7 @@ bot.on("message:text", async (ctx) => {
             const marketMsg = await formatAdvancedMarketAnalysis();
             await ctx.reply(marketMsg, { parse_mode: "Markdown" });
             break;
-        case "💡 توصية افتراضية":
+        case "💡 توصية افتراضية": // Handles the new virtual trade feature
             await ctx.reply("اختر الإجراء المطلوب للتوصيات الافتراضية:", { reply_markup: virtualTradeKeyboard });
             break;
         case "⚡ إحصائيات سريعة":
@@ -1126,11 +1138,11 @@ async function startBot() {
         await connectDB();
         console.log("MongoDB connected.");
 
-        // Schedule background jobs
+        // Schedule background jobs (including NEW monitorVirtualTrades)
         setInterval(monitorBalanceChanges, 60_000);
         setInterval(checkPriceAlerts, 30_000);
-        setInterval(checkPriceMovements, 60_000);
-        setInterval(monitorVirtualTrades, 30_000); // NEW
+        setInterval(checkPriceMovements, 60_000); 
+        setInterval(monitorVirtualTrades, 30_000); // NEW: Virtual trades monitor
         setInterval(runHourlyJobs, 3_600_000);
         setInterval(runDailyJobs, 86_400_000);
 
@@ -1144,8 +1156,9 @@ async function startBot() {
         }
     } catch (e) {
         console.error("FATAL: Could not start the bot.", e);
-        process.exit(1);
+        process.exit(1); 
     }
 }
 
+// Start the bot after all functions are defined
 startBot();
