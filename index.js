@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v105 (Stable & Verified Build)
+// OKX Advanced Analytics Bot - v106 (The Accountability Fix)
 // =================================================================
 
 const express = require("express");
@@ -330,8 +330,6 @@ function createChartUrl(history, periodLabel, pnl) {
 // SECTION 3: FORMATTING AND MESSAGE GENERATION FUNCTIONS 
 // =================================================================
 
-// --- BOT (PRIVATE) MESSAGES ---
-
 function formatPrivateBuy(details) {
     const { asset, price, amountChange, tradeValue, oldTotalValue, newAssetWeight, newUsdtValue, newCashPercent } = details;
     const tradeSizePercent = oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0;
@@ -391,8 +389,6 @@ function formatPrivateCloseReport(details) {
     msg += `━━━━━━━━━━━━━━━━━━━━\n*بتاريخ الإغلاق:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
     return msg;
 }
-
-// --- CHANNEL (PUBLIC) MESSAGES ---
 
 function formatPublicBuy(details) {
     const { asset, price, oldTotalValue, tradeValue, oldUsdtValue, newCashPercent } = details;
@@ -454,8 +450,6 @@ function formatPublicClose(details) {
     msg += `#نتائج_توصيات #${asset}`;
     return msg;
 }
-
-// --- CORE REPORTING FUNCTIONS ---
 
 async function formatPortfolioMsg(assets, total, capital) {
     const positions = await loadPositions();
@@ -597,9 +591,14 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
             const avgSellPrice = position.totalAmountSold > 0 ? position.realizedValue / position.totalAmountSold : 0;
 
             const closeReportData = {
-                asset, pnl: finalPnl, pnlPercent, durationDays,
-                avgBuyPrice: position.avgBuyPrice, avgSellPrice,
-                highestPrice: position.highestPrice, lowestPrice: position.lowestPrice
+                asset,
+                pnl: finalPnl,
+                pnlPercent: finalPnlPercent, // ✅ THIS IS THE FIX
+                durationDays,
+                avgBuyPrice: position.avgBuyPrice,
+                avgSellPrice,
+                highestPrice: position.highestPrice,
+                lowestPrice: position.lowestPrice
             };
             
             await saveClosedTrade(closeReportData);
@@ -955,7 +954,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v105 - Stable & Verified Build*\n\n` +
+        `*الإصدار: v106 - The Accountability Fix*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -1012,7 +1011,7 @@ bot.on("callback_query:data", async (ctx) => {
                 periodLabel = "آخر 30 يومًا"; 
                 periodData = history.slice(-30).map(h => ({ label: h.date.slice(5), total: h.total })); 
             } else {
-                return; // Should not happen
+                return;
             }
             
             if (!periodData || periodData.length < 2) { 
@@ -1189,10 +1188,9 @@ bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (text.startsWith('/')) return;
 
-    // --- State-based input handlers ---
     if (waitingState) {
         const state = waitingState;
-        waitingState = null; // Reset state immediately
+        waitingState = null;
         
         switch (state) {
             case 'add_virtual_trade':
@@ -1373,7 +1371,6 @@ bot.on("message:text", async (ctx) => {
         }
     }
     
-    // --- Main menu button handlers ---
     switch (text) {
         case "📊 عرض المحفظة":
             const loadingMsgPortfolio = await ctx.reply("⏳ جاري إعداد التقرير...");
@@ -1455,13 +1452,13 @@ async function startBot() {
         console.log("MongoDB connected.");
 
         // Schedule background jobs
-        setInterval(monitorBalanceChanges, 60 * 1000);       // 1 minute
-        setInterval(trackPositionHighLow, 60 * 1000);      // 1 minute
-        setInterval(checkPriceAlerts, 30 * 1000);          // 30 seconds
-        setInterval(checkPriceMovements, 60 * 1000);       // 1 minute
-        setInterval(monitorVirtualTrades, 30 * 1000);      // 30 seconds
-        setInterval(runHourlyJobs, 60 * 60 * 1000);        // 1 hour
-        setInterval(runDailyJobs, 24 * 60 * 60 * 1000);    // 24 hours
+        setInterval(monitorBalanceChanges, 60 * 1000);
+        setInterval(trackPositionHighLow, 60 * 1000);
+        setInterval(checkPriceAlerts, 30 * 1000);
+        setInterval(checkPriceMovements, 60 * 1000);
+        setInterval(monitorVirtualTrades, 30 * 1000);
+        setInterval(runHourlyJobs, 60 * 60 * 1000);
+        setInterval(runDailyJobs, 24 * 60 * 60 * 1000);
 
         // Initial data load to prevent empty state issues
         await runHourlyJobs();
