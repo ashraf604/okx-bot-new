@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v87 (Definitive Merge & Comprehensive Fix)
+// OKX Advanced Analytics Bot - v88 (Stable Base v70 + Virtual Trades)
 // =================================================================
 
 const express = require("express");
@@ -69,7 +69,7 @@ async function getHistoricalPerformance(asset) {
     }
 }
 
-// --- Virtual Trade DB Functions ---
+// --- NEW: Virtual Trade DB Functions ---
 async function saveVirtualTrade(tradeData) {
     try {
         const tradeWithId = { ...tradeData, _id: new crypto.randomBytes(16).toString("hex") };
@@ -97,8 +97,6 @@ async function updateVirtualTradeStatus(tradeId, status, finalPrice) {
     }
 }
 
-
-// --- Existing DB Helpers ---
 const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
 const saveCapital = (amount) => saveConfig("capital", { value: amount });
 const loadSettings = async () => await getConfig("settings", { dailySummary: true, autoPostToChannel: false, debugMode: false });
@@ -117,7 +115,6 @@ const loadAlertSettings = async () => await getConfig("alertSettings", { global:
 const saveAlertSettings = (settings) => saveConfig("alertSettings", settings);
 const loadPriceTracker = async () => await getConfig("priceTracker", { totalPortfolioValue: 0, assets: {} });
 const savePriceTracker = (tracker) => saveConfig("priceTracker", tracker);
-
 
 function formatNumber(num, decimals = 2) {
     const number = parseFloat(num);
@@ -166,9 +163,7 @@ async function getMarketPrices() {
             const lastPrice = parseFloat(t.last);
             const openPrice = parseFloat(t.open24h);
             let change24h = 0;
-            if (openPrice > 0) {
-                change24h = (lastPrice - openPrice) / openPrice;
-            }
+            if (openPrice > 0) change24h = (lastPrice - openPrice) / openPrice;
             prices[t.instId] = { price: lastPrice, open24h: openPrice, change24h: change24h };
         });
         return prices;
@@ -283,7 +278,7 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
     const tradeValue = Math.abs(amountChange) * price;
     let report = null;
 
-    if (amountChange > 0) { // Buy
+    if (amountChange > 0) {
         if (!position) {
             positions[asset] = { totalAmountBought: amountChange, totalCost: tradeValue, avgBuyPrice: price, openDate: new Date().toISOString(), totalAmountSold: 0, realizedValue: 0 };
         } else {
@@ -291,10 +286,10 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
             position.totalCost += tradeValue;
             position.avgBuyPrice = position.totalCost / position.totalAmountBought;
         }
-    } else if (amountChange < 0 && position) { // Sell
+    } else if (amountChange < 0 && position) {
         position.realizedValue += tradeValue;
         position.totalAmountSold += Math.abs(amountChange);
-        if (newTotalAmount * price < 1) { // Position Closed
+        if (newTotalAmount * price < 1) {
             const finalPnl = position.realizedValue - position.totalCost;
             const finalPnlPercent = position.totalCost > 0 ? (finalPnl / position.totalCost) * 100 : 0;
             report = `✅ *تقرير إغلاق مركز: ${asset}*\n\n` + `*النتيجة النهائية للصفقة:* ${finalPnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${finalPnl >= 0 ? '+' : ''}${formatNumber(finalPnl)}\` (\`${finalPnl >= 0 ? '+' : ''}${formatNumber(finalPnlPercent)}%\`)`;
@@ -387,6 +382,7 @@ async function checkPriceAlerts() {
     }
 }
 
+// --- NEW: Background job for virtual trades ---
 async function monitorVirtualTrades() {
     const activeTrades = await getActiveVirtualTrades();
     if (activeTrades.length === 0) return;
@@ -476,7 +472,6 @@ async function runDailyJobs() {
     }
 }
 
-
 // =================================================================
 // SECTION 4: BOT SETUP, KEYBOARDS, AND HANDLERS
 // =================================================================
@@ -496,6 +491,7 @@ async function sendSettingsMenu(ctx) {
     const settingsKeyboard = new InlineKeyboard()
         .text("💰 تعيين رأس المال", "set_capital")
         .text("💼 عرض المراكز المفتوحة", "view_positions").row()
+        .text("🚨 إدارة تنبيهات الحركة", "manage_movement_alerts") // This button was missing
         .text("🗑️ حذف تنبيه سعر", "delete_alert").row()
         .text(`📰 الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary")
         .text(`🐞 وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug").row()
@@ -508,13 +504,25 @@ async function sendSettingsMenu(ctx) {
     }
 }
 
+// This function was missing
+async function sendMovementAlertsMenu(ctx) {
+    const alertSettings = await loadAlertSettings();
+    const text = `🚨 *إدارة تنبيهات حركة الأسعار*\n\n- *النسبة العامة الحالية:* \`${alertSettings.global}%\`.\n- يمكنك تعيين نسبة مختلفة لعملة معينة.`;
+    const keyboard = new InlineKeyboard()
+        .text("📊 تعديل النسبة العامة", "set_global_alert")
+        .text("💎 تعديل نسبة عملة", "set_coin_alert").row()
+        .text("🔙 العودة للإعدادات", "back_to_settings");
+    await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard });
+}
+
+
 bot.use(async (ctx, next) => {
     if (ctx.from?.id === AUTHORIZED_USER_ID) await next();
 });
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v87 - Stable & Complete*\n\n` +
+        `*الإصدار: v88 - Stable & Complete*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك وصفقاتك الحقيقية.\n` +
         `- 💡 متابعة توصيات افتراضية وتنبيهك بالنتائج.\n` +
@@ -576,7 +584,6 @@ bot.on("callback_query:data", async (ctx) => {
     }
     
     switch(data) {
-        // --- Virtual Trade Callbacks ---
         case "add_virtual_trade":
             waitingState = 'add_virtual_trade';
             await ctx.editMessageText(
@@ -589,6 +596,7 @@ bot.on("callback_query:data", async (ctx) => {
                 "**ملاحظة:** *لا تكتب كلمات مثل 'دخول' أو 'هدف'، فقط الأرقام والرمز.*"
             , { parse_mode: "Markdown" });
             break;
+
         case "track_virtual_trades":
             await ctx.editMessageText("⏳ جاري جلب التوصيات النشطة...");
             const activeTrades = await getActiveVirtualTrades();
@@ -610,16 +618,19 @@ bot.on("callback_query:data", async (ctx) => {
                     const emoji = pnl >= 0 ? '🟢' : '🔴';
                     reportMsg += `*${trade.instId}* ${emoji}\n` +
                                ` ▫️ *الدخول:* \`$${formatNumber(trade.entryPrice, 4)}\` | *الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n` +
-                               ` ▫️ *الربح/الخسارة:* \`$${formatNumber(pnl)}\` (\`${formatNumber(pnlPercent)}%\`)\n` +
+                               ` ▫️ *ربح/خسارة:* \`$${formatNumber(pnl)}\` (\`${formatNumber(pnlPercent)}%\`)\n` +
                                ` ▫️ *الهدف:* \`$${formatNumber(trade.targetPrice, 4)}\` | *الوقف:* \`$${formatNumber(trade.stopLossPrice, 4)}\`\n`;
                 }
                 reportMsg += "━━━━━━━━━━━━━━━━━━━━\n";
             }
             await ctx.editMessageText(reportMsg, { parse_mode: "Markdown", reply_markup: virtualTradeKeyboard });
             break;
-        
-        // --- Settings Callbacks ---
+            
         case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط)."); break;
+        case "back_to_settings": await sendSettingsMenu(ctx); break;
+        case "manage_movement_alerts": await sendMovementAlertsMenu(ctx); break;
+        case "set_global_alert": waitingState = 'set_global_alert_state'; await ctx.editMessageText("✍️ يرجى إرسال النسبة العامة الجديدة (مثال: `5`)."); break;
+        case "set_coin_alert": waitingState = 'set_coin_alert_state'; await ctx.editMessageText("✍️ يرجى إرسال رمز العملة والنسبة.\n*مثال:*\n`BTC 2.5`"); break;
         case "view_positions":
             const positions = await loadPositions();
             if (Object.keys(positions).length === 0) { await ctx.editMessageText("ℹ️ لا توجد مراكز مفتوحة.", { reply_markup: new InlineKeyboard().text("🔙 العودة", "back_to_settings") }); break; }
@@ -652,7 +663,6 @@ bot.on("callback_query:data", async (ctx) => {
             waitingState = 'confirm_delete_all';
             await ctx.editMessageText("⚠️ *تحذير: هذا الإجراء لا يمكن التراجع عنه!* لحذف كل شيء، أرسل: `تأكيد الحذف`", { parse_mode: "Markdown" });
             break;
-        case "back_to_settings": await sendSettingsMenu(ctx); break;
     }
 });
 
@@ -666,7 +676,7 @@ bot.on("message:text", async (ctx) => {
         switch (state) {
             case 'add_virtual_trade':
                 try {
-                    const lines = text.split('\n').map(line => line.trim().split(':')[0]); // Handles both "0.5" and "key: 0.5"
+                    const lines = text.split('\n').map(line => line.trim());
                     if (lines.length < 5) throw new Error("التنسيق غير صحيح، يجب أن يتكون من 5 أسطر.");
 
                     const instId = lines[0].toUpperCase();
@@ -705,47 +715,42 @@ bot.on("message:text", async (ctx) => {
                  await saveAlerts(allAlerts);
                  await ctx.reply(`✅ تم ضبط التنبيه: ${symbol.toUpperCase()} ${cond} ${price}`, { parse_mode: "Markdown" });
                  return;
-            
             case 'set_capital':
-                const amount = parseFloat(text);
-                if (!isNaN(amount) && amount >= 0) {
-                    await saveCapital(amount);
-                    await ctx.reply(`✅ *تم تحديث رأس المال إلى:* \`$${formatNumber(amount)}\``, { parse_mode: "Markdown" });
-                } else await ctx.reply("❌ مبلغ غير صالح.");
-                return;
-            
-            case 'delete_alert_number':
-                let currentAlerts = await loadAlerts();
-                const index = parseInt(text) - 1;
-                if (isNaN(index) || index < 0 || index >= currentAlerts.length) return await ctx.reply("❌ رقم غير صالح.");
-                currentAlerts.splice(index, 1);
-                await saveAlerts(currentAlerts);
-                await ctx.reply(`✅ تم حذف التنبيه.`);
-                return;
-
-            case 'confirm_delete_all':
-                if (text === 'تأكيد الحذف') {
-                    await getCollection("configs").deleteMany({});
-                    await ctx.reply("✅ تم حذف جميع بياناتك.");
-                } else await ctx.reply("❌ تم إلغاء الحذف.");
-                return;
-            
+                 const amount = parseFloat(text);
+                 if (!isNaN(amount) && amount >= 0) {
+                     await saveCapital(amount);
+                     await ctx.reply(`✅ *تم تحديث رأس المال إلى:* \`$${formatNumber(amount)}\``, { parse_mode: "Markdown" });
+                 } else await ctx.reply("❌ مبلغ غير صالح.");
+                 return;
+             case 'delete_alert_number':
+                 let currentAlerts = await loadAlerts();
+                 const index = parseInt(text) - 1;
+                 if (isNaN(index) || index < 0 || index >= currentAlerts.length) return await ctx.reply("❌ رقم غير صالح.");
+                 currentAlerts.splice(index, 1);
+                 await saveAlerts(currentAlerts);
+                 await ctx.reply(`✅ تم حذف التنبيه.`);
+                 return;
+             case 'confirm_delete_all':
+                 if (text === 'تأكيد الحذف') {
+                     await getCollection("configs").deleteMany({});
+                     await ctx.reply("✅ تم حذف جميع بياناتك.");
+                 } else await ctx.reply("❌ تم إلغاء الحذف.");
+                 return;
              case 'coin_info':
-                const instId = text.toUpperCase();
-                const loadingMsg = await ctx.reply(`⏳ جاري تجهيز التقرير لـ ${instId}...`);
-                const details = await getInstrumentDetails(instId);
-                if (details.error) return await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${details.error}`);
-                // Simplified for brevity, add more sections if needed
-                let msg = `ℹ️ *معلومات سريعة | ${instId}*\n\n` +
-                          `*السعر الحالي:* \`$${formatNumber(details.price, 4)}\`\n` +
-                          `*أعلى (24س):* \`$${formatNumber(details.high24h, 4)}\`\n` +
-                          `*أدنى (24س):* \`$${formatNumber(details.low24h, 4)}\``;
-                await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
-                return;
+                 const instId = text.toUpperCase();
+                 const loadingMsg = await ctx.reply(`⏳ جاري تجهيز التقرير لـ ${instId}...`);
+                 const details = await getInstrumentDetails(instId);
+                 if (details.error) return await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${details.error}`);
+                 let msg = `ℹ️ *معلومات سريعة | ${instId}*\n\n` +
+                           `*السعر الحالي:* \`$${formatNumber(details.price, 4)}\`\n` +
+                           `*أعلى (24س):* \`$${formatNumber(details.high24h, 4)}\`\n` +
+                           `*أدنى (24س):* \`$${formatNumber(details.low24h, 4)}\``;
+                 await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
+                 return;
         }
     }
     
-    // --- Main Menu Button Handlers ---
+    // --- Fallback for Main Menu Buttons ---
     switch (text) {
         case "📊 عرض المحفظة":
             await ctx.reply("⏳ جاري إعداد التقرير...");
@@ -754,12 +759,8 @@ bot.on("message:text", async (ctx) => {
             const capital = await loadCapital();
             const { assets, total, error } = await getPortfolio(prices);
             if (error) return await ctx.reply(error);
-            // This is a simplified message. The full formatPortfolioMsg can be used here.
-             const msg = `🧾 *ملخص المحفظة*\n` +
-                `*القيمة الإجمالية:* \`$${formatNumber(total)}\`\n` +
-                `*رأس المال:* \`$${formatNumber(capital)}\`\n` +
-                `*عدد الأصول:* \`${assets.length}\``;
-            await ctx.reply(msg, { parse_mode: "Markdown" });
+            const portfolioMsg = `🧾 *ملخص المحفظة*\n` + `*القيمة الإجمالية:* \`$${formatNumber(total)}\`\n` + `*رأس المال:* \`$${formatNumber(capital)}\`\n` + `*عدد الأصول:* \`${assets.length}\``;
+            await ctx.reply(portfolioMsg, { parse_mode: "Markdown" });
             break;
         case "💡 توصية افتراضية":
             await ctx.reply("اختر الإجراء المطلوب للتوصيات الافتراضية:", { reply_markup: virtualTradeKeyboard });
