@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v93 (Definitive Merge: Stable v83 + Virtual Trades)
+// OKX Advanced Analytics Bot - v94 (Definitive Merge: Stable v83 + Virtual Trades)
 // =================================================================
 
 const express = require("express");
@@ -98,7 +98,6 @@ async function updateVirtualTradeStatus(tradeId, status, finalPrice) {
         console.error(`Error updating virtual trade ${tradeId}:`, e);
     }
 }
-
 
 const loadCapital = async () => (await getConfig("capital", { value: 0 })).value;
 const saveCapital = (amount) => saveConfig("capital", { value: amount });
@@ -346,6 +345,24 @@ async function formatAdvancedMarketAnalysis() {
     return msg;
 }
 
+// This function is no longer used by a button but is kept for integrity
+async function formatTop5Assets(assets) {
+    if (!assets || assets.length === 0) return "ℹ️ لا توجد أصول في محفظتك لعرضها.";
+
+    const topAssets = assets.filter(a => a.asset !== 'USDT').slice(0, 5);
+    if (topAssets.length === 0) return "ℹ️ لا توجد أصول (غير USDT) في محفظتك لعرضها.";
+    
+    let msg = "🏆 *أفضل 5 أصول في محفظتك*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+    const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+    topAssets.forEach((asset, index) => {
+        msg += `${medals[index] || '▪️'} *${asset.asset}*\n`;
+        msg += `💰 *القيمة:* \`$${formatNumber(asset.value)}\`\n`;
+        msg += `💵 *السعر:* \`$${formatNumber(asset.price, 4)}\`\n\n`;
+    });
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 *نصيحة:* ركز على الأصول ذات الأداء الجيد وادرس أسباب تفوقها.";
+    return msg;
+}
+
 async function formatQuickStats(assets, total, capital) {
     const pnl = capital > 0 ? total - capital : 0;
     const pnlPercent = capital > 0 ? (pnl / capital) * 100 : 0;
@@ -494,7 +511,7 @@ async function monitorBalanceChanges() {
             const closeReport = await updatePositionAndAnalyze(asset, difference, priceData.price, currAmount);
             if (closeReport) {
                 await bot.api.sendMessage(AUTHORIZED_USER_ID, closeReport, { parse_mode: "Markdown" });
-                 const settings = await loadSettings();
+                const settings = await loadSettings();
                 if (settings.autoPostToChannel) {
                     await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, closeReport, { parse_mode: "Markdown" });
                 } else {
@@ -684,7 +701,7 @@ async function monitorVirtualTrades() {
 
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
-    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row() // Replaced "أفضل 5 أصول"
+    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row()
     .text("⚡ إحصائيات سريعة").text("ℹ️ معلومات عملة").row()
     .text("🔔 ضبط تنبيه").text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").resized();
@@ -729,8 +746,13 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v93 - Stable Merge*\n\n` +
-        `تم دمج جميع الميزات السابقة مع ميزة التوصيات الافتراضية.`;
+        `*الإصدار: v94 - Definitive Merge*\n\n` +
+        `أنا هنا لمساعدتك على:\n` +
+        `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
+        `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
+        `- 💡 إضافة ومتابعة توصيات افتراضية.\n` +
+        `- 🔔 ضبط تنبيهات ذكية للأسعار والحركات الهامة.\n\n` +
+        `*اضغط على الأزرار أدناه للبدء!*`;
     ctx.reply(welcomeMessage, { parse_mode: "Markdown", reply_markup: mainKeyboard });
 });
 
@@ -786,7 +808,7 @@ bot.on("callback_query:data", async (ctx) => {
         return;
     }
 
-     if (data === "publish_report" || data === "ignore_report") {
+    if (data === "publish_report" || data === "ignore_report") {
         const originalText = ctx.callbackQuery.message.text;
         if(data === "publish_report") {
             const markerStart = originalText.indexOf("<REPORT>");
@@ -807,7 +829,6 @@ bot.on("callback_query:data", async (ctx) => {
     }
     
     switch(data) {
-        // --- NEW Virtual Trade Callbacks ---
         case "add_virtual_trade":
             waitingState = 'add_virtual_trade';
             await ctx.editMessageText(
@@ -830,7 +851,6 @@ bot.on("callback_query:data", async (ctx) => {
             if (!prices) {
                 return await ctx.editMessageText("❌ فشل جلب الأسعار، لا يمكن متابعة التوصيات.", { reply_markup: virtualTradeKeyboard });
             }
-
             let reportMsg = "📈 *متابعة حية للتوصيات النشطة:*\n" + "━━━━━━━━━━━━━━━━━━━━\n";
             for (const trade of activeTrades) {
                 const currentPrice = prices[trade.instId]?.price;
@@ -851,8 +871,6 @@ bot.on("callback_query:data", async (ctx) => {
             }
             await ctx.editMessageText(reportMsg, { parse_mode: "Markdown", reply_markup: virtualTradeKeyboard });
             break;
-
-        // --- Existing Settings Callbacks ---
         case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط)."); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "manage_movement_alerts": await sendMovementAlertsMenu(ctx); break;
@@ -929,7 +947,6 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`❌ *خطأ في إضافة التوصية:*\n${e.message}\n\nالرجاء المحاولة مرة أخرى بالتنسيق الصحيح.`);
                 }
                 return;
-            
             case 'set_capital':
                 const amount = parseFloat(text);
                 if (!isNaN(amount) && amount >= 0) {
@@ -964,7 +981,7 @@ bot.on("message:text", async (ctx) => {
             case 'confirm_delete_all':
                 if (text === 'تأكيد الحذف') {
                     await getCollection("configs").deleteMany({});
-                    await getCollection("virtualTrades").deleteMany({}); // Also delete virtual trades
+                    await getCollection("virtualTrades").deleteMany({});
                     await ctx.reply("✅ تم حذف جميع بياناتك.");
                 } else await ctx.reply("❌ تم إلغاء الحذف.");
                 return;
@@ -1041,14 +1058,23 @@ bot.on("message:text", async (ctx) => {
                 return;
         }
     }
+    
+    let portfolioData;
+    const fetchPortfolioData = async () => {
+        if (!portfolioData) {
+            const prices = await getMarketPrices();
+            if (!prices) return { error: "❌ فشل جلب أسعار السوق." };
+            const capital = await loadCapital();
+            portfolioData = await getPortfolio(prices);
+            portfolioData.capital = capital;
+        }
+        return portfolioData;
+    };
 
     switch (text) {
         case "📊 عرض المحفظة":
             await ctx.reply("⏳ جاري إعداد التقرير...");
-            const prices = await getMarketPrices();
-            if (!prices) return await ctx.reply("❌ فشل جلب أسعار السوق.");
-            const capital = await loadCapital();
-            const { assets, total, error } = await getPortfolio(prices);
+            const { assets, total, capital, error } = await fetchPortfolioData();
             if (error) return await ctx.reply(error);
             const msgPortfolio = await formatPortfolioMsg(assets, total, capital);
             await ctx.reply(msgPortfolio, { parse_mode: "Markdown" });
@@ -1063,12 +1089,63 @@ bot.on("message:text", async (ctx) => {
             break;
         case "⚡ إحصائيات سريعة":
             await ctx.reply("⏳ جاري حساب الإحصائيات...");
-            const pricesStats = await getMarketPrices();
-            if (!pricesStats) return await ctx.reply("❌ فشل جلب أسعار السوق.");
-            const capitalStats = await loadCapital();
-            const { assets: quickAssets, total: quickTotal, error: quickError } = await getPortfolio(pricesStats);
+            const { assets: quickAssets, total: quickTotal, capital: quickCapital, error: quickError } = await fetchPortfolioData();
             if (quickError) return await ctx.reply(quickError);
-            const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, capitalStats);
+            const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, quickCapital);
             await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
             break;
-        case "📈
+        case "📈 أداء المحفظة":
+            const performanceKeyboard = new InlineKeyboard().text("آخر 24 ساعة", "chart_24h").row().text("آخر 7 أيام", "chart_7d").row().text("آخر 30 يومًا", "chart_30d");
+            await ctx.reply("اختر الفترة الزمنية لعرض تقرير الأداء:", { reply_markup: performanceKeyboard });
+            break;
+        case "ℹ️ معلومات عملة":
+            waitingState = 'coin_info';
+            await ctx.reply("✍️ يرجى إرسال رمز العملة (مثال: `BTC-USDT`).");
+            break;
+        case "⚙️ الإعدادات":
+            await sendSettingsMenu(ctx);
+            break;
+        case "🔔 ضبط تنبيه":
+            waitingState = 'set_alert';
+            await ctx.reply("✍️ *لضبط تنبيه سعر، استخدم الصيغة:*\n`BTC > 50000`", { parse_mode: "Markdown" });
+            break;
+        case "🧮 حاسبة الربح والخسارة":
+            await ctx.reply("✍️ لحساب الربح/الخسارة، استخدم أمر `/pnl` بالصيغة التالية:\n`/pnl <سعر الشراء> <سعر البيع> <الكمية>`", {parse_mode: "Markdown"});
+            break;
+    }
+});
+
+// =================================================================
+// SECTION 6: SERVER AND BOT INITIALIZATION
+// =================================================================
+
+app.get("/healthcheck", (req, res) => res.status(200).send("OK"));
+
+async function startBot() {
+    try {
+        await connectDB();
+        console.log("MongoDB connected.");
+
+        // Schedule background jobs
+        setInterval(monitorBalanceChanges, 60_000);
+        setInterval(checkPriceAlerts, 30_000);
+        setInterval(checkPriceMovements, 60_000);
+        setInterval(monitorVirtualTrades, 30_000); // NEW
+        setInterval(runHourlyJobs, 3_600_000);
+        setInterval(runDailyJobs, 86_400_000);
+
+        if (process.env.NODE_ENV === "production") {
+            app.use(express.json());
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+        } else {
+            await bot.start();
+            console.log("Bot started with polling.");
+        }
+    } catch (e) {
+        console.error("FATAL: Could not start the bot.", e);
+        process.exit(1);
+    }
+}
+
+startBot();
