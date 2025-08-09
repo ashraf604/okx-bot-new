@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v101 (Core Functionality Restoration)
+// OKX Advanced Analytics Bot - v102 (Syntax Crash Fix & Full Review)
 // =================================================================
 
 const express = require("express");
@@ -451,7 +451,7 @@ function formatPublicClose(details) {
     return msg;
 }
 
-// --- RESTORED CORE REPORTING FUNCTIONS ---
+// --- CORE REPORTING FUNCTIONS ---
 
 async function formatPortfolioMsg(assets, total, capital) {
     const positions = await loadPositions();
@@ -943,7 +943,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v101 - Core Functionality Restoration*\n\n` +
+        `*الإصدار: v102 - Syntax Crash Fix & Full Review*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -1186,6 +1186,7 @@ bot.on("message:text", async (ctx) => {
                 if (text === 'تأكيد الحذف') {
                     await getCollection("configs").deleteMany({});
                     await getCollection("virtualTrades").deleteMany({});
+                    await getCollection("tradeHistory").deleteMany({});
                     await ctx.reply("✅ تم حذف جميع بياناتك.");
                 } else await ctx.reply("❌ تم إلغاء الحذف.");
                 return;
@@ -1226,8 +1227,9 @@ bot.on("message:text", async (ctx) => {
                 } else msg += ` ▪️ لا يوجد تاريخ صفقات مغلقة لهذه العملة.\n\n`;
 
                 msg += `*القسم الرابع: مؤشرات فنية بسيطة*\n`;
-                if (techAnalysis.error) msg += ` ▪️ ${techAnalysis.error}\n`;
-                else {
+                if (techAnalysis.error) {
+                     msg += ` ▪️ ${techAnalysis.error}\n`;
+                } else {
                     let rsiText = "محايد";
                     if (techAnalysis.rsi > 70) rsiText = "تشبع شرائي 🔴";
                     if (techAnalysis.rsi < 30) rsiText = "تشبع بيعي 🟢";
@@ -1279,9 +1281,11 @@ bot.on("message:text", async (ctx) => {
         case "📊 عرض المحفظة":
             await ctx.reply("⏳ جاري إعداد التقرير...");
             const { assets, total, capital, error } = await fetchPortfolioData();
-            if (error) return await ctx.reply(error);
-            const msgPortfolio = await formatPortfolioMsg(assets, total, capital);
-            await ctx.reply(msgPortfolio, { parse_mode: "Markdown" });
+            if (error) { await ctx.reply(error); }
+            else {
+                const msgPortfolio = await formatPortfolioMsg(assets, total, capital);
+                await ctx.reply(msgPortfolio, { parse_mode: "Markdown" });
+            }
             break;
         case "🚀 تحليل السوق":
             await ctx.reply("⏳ جاري تحليل السوق...");
@@ -1294,12 +1298,13 @@ bot.on("message:text", async (ctx) => {
         case "⚡ إحصائيات سريعة":
             await ctx.reply("⏳ جاري حساب الإحصائيات...");
             const { assets: quickAssets, total: quickTotal, capital: quickCapital, error: quickError } = await fetchPortfolioData();
-            if (quickError) return await ctx.reply(quickError);
-            const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, quickCapital);
-            await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
+            if (quickError) { await ctx.reply(quickError); }
+            else {
+                 const quickStatsMsg = await formatQuickStats(quickAssets, quickTotal, quickCapital);
+                 await ctx.reply(quickStatsMsg, { parse_mode: "Markdown" });
+            }
             break;
         case "📈 أداء المحفظة":
-            await ctx.reply("⏳ جاري إعداد التقرير...");
             const performanceKeyboard = new InlineKeyboard().text("آخر 24 ساعة", "chart_24h").row().text("آخر 7 أيام", "chart_7d").row().text("آخر 30 يومًا", "chart_30d");
             await ctx.reply("اختر الفترة الزمنية لعرض تقرير الأداء:", { reply_markup: performanceKeyboard });
             break;
@@ -1338,4 +1343,20 @@ async function startBot() {
         setInterval(trackPositionHighLow, 60_000);
         setInterval(monitorVirtualTrades, 30_000);
         setInterval(runHourlyJobs, 3_600_000);
-        setInterval(runDailyJobs,
+        setInterval(runDailyJobs, 86_400_000);
+
+        if (process.env.NODE_ENV === "production") {
+            app.use(express.json());
+            app.use(webhookCallback(bot, "express"));
+            app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+        } else {
+            await bot.start();
+            console.log("Bot started with polling.");
+        }
+    } catch (e) {
+        console.error("FATAL: Could not start the bot.", e);
+        process.exit(1); 
+    }
+}
+
+startBot();
