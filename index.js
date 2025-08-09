@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v96 (Definitive Merge: User's Stable v83 + Virtual Trades)
+// OKX Advanced Analytics Bot - v99 (Final Report Restoration & Price Tracking)
 // =================================================================
 
 const express = require("express");
@@ -71,7 +71,6 @@ async function getHistoricalPerformance(asset) {
     }
 }
 
-// --- NEW: Virtual Trade DB Functions (added from v94, integrated into v83) ---
 async function saveVirtualTrade(tradeData) {
     try {
         const tradeWithId = { ...tradeData, _id: new crypto.randomBytes(16).toString("hex") };
@@ -185,7 +184,7 @@ async function getPortfolio(prices) {
         const json = await res.json();
         if (json.code !== '0') return { error: `فشل جلب المحفظة: ${json.msg}` };
         
-        let assets = [], total = 0;
+        let assets = [], total = 0, usdtValue = 0;
         json.data[0]?.details?.forEach(asset => {
             const amount = parseFloat(asset.eq);
             if (amount > 0) {
@@ -193,6 +192,11 @@ async function getPortfolio(prices) {
                 const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 };
                 const value = amount * priceData.price;
                 total += value;
+
+                if (asset.ccy === "USDT") {
+                    usdtValue = value;
+                }
+
                 if (value >= 1) {
                     assets.push({ asset: asset.ccy, price: priceData.price, value, amount, change24h: priceData.change24h });
                 }
@@ -200,7 +204,7 @@ async function getPortfolio(prices) {
         });
         
         assets.sort((a, b) => b.value - a.value);
-        return { assets, total };
+        return { assets, total, usdtValue };
     } catch (e) {
         console.error(e);
         return { error: "خطأ في الاتصال بالمنصة." };
@@ -323,6 +327,79 @@ function createChartUrl(history, periodLabel, pnl) {
 // SECTION 3: FORMATTING AND MESSAGE GENERATION FUNCTIONS
 // =================================================================
 
+// --- RESTORED & ENHANCED MESSAGE FORMATTING ---
+
+// For partial Buy/Sell trades (private)
+function formatPrivateTradeAnalysis(details) {
+    const { tradeType, tradeEmoji, asset, price, amountChange, tradeValue, oldTotalValue, newAssetWeight, newUsdtValue, newCashPercent } = details;
+    const tradeSizePercent = oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0;
+
+    let msg = `*متابعة المحفظة📊:*\n🔔 *تحليل حركة تداول*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🔸 *العملية:* ${tradeType} ${tradeEmoji}\n`;
+    msg += `🔸 *الأصل:* \`${asset}/USDT\`\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n📝 *تفاصيل الصفقة:*\n`;
+    msg += ` ▫️ *سعر التنفيذ:* \`$${formatNumber(price, 4)}\`\n`;
+    msg += ` ▫️ *الكمية:* \`${formatNumber(Math.abs(amountChange), 6)}\`\n`;
+    msg += ` ▫️ *قيمة الصفقة:* \`$${formatNumber(tradeValue)}\`\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n📊 *التأثير على المحفظة:*\n`;
+    msg += ` ▫️ *حجم الصفقة من المحفظة:* \`${formatNumber(tradeSizePercent)}%\`\n`;
+    msg += ` ▫️ *الوزن الجديد للعملة:* \`${formatNumber(newAssetWeight)}%\`\n`;
+    msg += ` ▫️ *الرصيد النقدي الجديد:* \`$${formatNumber(newUsdtValue)}\`\n`;
+    msg += ` ▫️ *نسبة الكاش الجديدة:* \`${formatNumber(newCashPercent)}%\`\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `*بتاريخ:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
+    return msg;
+}
+
+// For closed trades (private)
+function formatPrivateCloseReport(details) {
+    const { asset, avgBuyPrice, avgSellPrice, pnl, pnlPercent, durationDays, highestPrice, lowestPrice } = details;
+    const pnlSign = pnl >= 0 ? '+' : '';
+    const emoji = pnl >= 0 ? '🟢⬆️' : '🔴⬇️';
+
+    let msg = `✅ *تقرير إغلاق مركز: ${asset}*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📈 *ملخص الأداء:*\n`;
+    msg += ` ▫️ *النتيجة النهائية:* ${emoji} \`${pnlSign}${formatNumber(pnl)}\` (\`${pnlSign}${formatNumber(pnlPercent)}%\`)\n`;
+    msg += ` ▫️ *فترة الاحتفاظ:* \`${formatNumber(durationDays, 1)} يوم\`\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n📝 *تفاصيل الأسعار:*\n`;
+    msg += ` ▫️ *متوسط الشراء:* \`$${formatNumber(avgBuyPrice, 4)}\`\n`;
+    msg += ` ▫️ *متوسط البيع:* \`$${formatNumber(avgSellPrice, 4)}\`\n`;
+    msg += ` ▫️ *أعلى سعر خلال الفترة:* \`$${formatNumber(highestPrice, 4)}\`\n`;
+    msg += ` ▫️ *أدنى سعر خلال الفترة:* \`$${formatNumber(lowestPrice, 4)}\`\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `*بتاريخ:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`;
+    return msg;
+}
+
+
+// For ALL trades (public channel)
+function formatPublicChannelPost(details) {
+    const { tradeType, tradeEmoji, asset, position, tradeValue, oldUsdtValue, newAssetWeight, isClose, closeReportData } = details;
+    const cashConsumedPercent = (tradeType === 'شراء' && oldUsdtValue > 0) ? (tradeValue / oldUsdtValue) * 100 : 0;
+    const pnlSign = isClose && closeReportData.pnl >= 0 ? '+' : '';
+
+
+    let msg = `*توصياتى:*\n🔔 *توصية: ${isClose ? 'إغلاق الصفقة' : tradeType} ${tradeEmoji}*\n\n`;
+    msg += `🔸 *الأصل:* \`${asset}/USDT\`\n\n`;
+    
+    if (!isClose && tradeType === 'شراء') {
+        msg += `📝 *تفاصيل الدخول:*\n`;
+        msg += `   ▫️ *متوسط سعر الشراء:* \`$${formatNumber(position.avgBuyPrice, 4)}\`\n`;
+        msg += `   ▫️ *حجم الدخول من المحفظة:* \`${formatNumber(details.tradeSizePercent)}%\`\n\n`;
+        msg += `📊 *التأثير على المحفظة:*\n`;
+        msg += `   ▫️ *نسبة استهلاك الكاش:* \`${formatNumber(cashConsumedPercent)}%\`\n`;
+        msg += `   ▫️ *الوزن الجديد للعملة:* \`${formatNumber(newAssetWeight)}%\`\n`;
+    } else if (isClose) {
+        msg += `📊 *نتيجة الصفقة:* ${closeReportData.pnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${pnlSign}${formatNumber(closeReportData.pnl)}\` (\`${pnlSign}${formatNumber(closeReportData.pnlPercent)}%\`)\n`;
+        msg += `   ▫️ *فترة الاحتفاظ:* \`${formatNumber(closeReportData.durationDays, 1)} يوم\`\n`;
+    }
+    // Partial sells are intentionally kept simple for the public channel
+    
+    msg += `\n*بتاريخ:* ${new Date().toLocaleDateString("de-DE")}`;
+    return msg;
+}
+
+
 async function formatAdvancedMarketAnalysis() {
     const prices = await getMarketPrices();
     if (!prices) return "❌ فشل جلب بيانات السوق.";
@@ -346,7 +423,6 @@ async function formatAdvancedMarketAnalysis() {
     return msg;
 }
 
-// Kept this function from v83, although its direct button is replaced
 async function formatTop5Assets(assets) {
     if (!assets || assets.length === 0) return "ℹ️ لا توجد أصول في محفظتك لعرضها.";
 
@@ -444,40 +520,65 @@ async function formatPortfolioMsg(assets, total, capital) {
 // =================================================================
 
 async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmount) {
-    if (!asset || price === undefined || price === null || isNaN(price)) return null;
+    if (!asset || price === undefined || price === null || isNaN(price)) return { analysisResult: null };
+    
     const positions = await loadPositions();
-    const position = positions[asset];
-    const tradeValue = Math.abs(amountChange) * price;
-    let report = null;
+    let position = positions[asset];
+    let analysisResult = { type: 'none', data: {} };
 
     if (amountChange > 0) { // Buy
         if (!position) {
-            positions[asset] = { totalAmountBought: amountChange, totalCost: tradeValue, avgBuyPrice: price, openDate: new Date().toISOString(), totalAmountSold: 0, realizedValue: 0 };
+            positions[asset] = { 
+                totalAmountBought: amountChange, 
+                totalCost: amountChange * price, 
+                avgBuyPrice: price, 
+                openDate: new Date().toISOString(), 
+                totalAmountSold: 0, 
+                realizedValue: 0,
+                highestPrice: price, // NEW: Initialize price tracking
+                lowestPrice: price   // NEW: Initialize price tracking
+            };
         } else {
             position.totalAmountBought += amountChange;
-            position.totalCost += tradeValue;
+            position.totalCost += (amountChange * price);
             position.avgBuyPrice = position.totalCost / position.totalAmountBought;
         }
+        analysisResult.type = 'trade';
     } else if (amountChange < 0 && position) { // Sell
-        position.realizedValue += tradeValue;
+        position.realizedValue += (Math.abs(amountChange) * price);
         position.totalAmountSold += Math.abs(amountChange);
+        
         if (newTotalAmount * price < 1) { // Position Closed
             const finalPnl = position.realizedValue - position.totalCost;
             const finalPnlPercent = position.totalCost > 0 ? (finalPnl / position.totalCost) * 100 : 0;
-            report = `✅ *تقرير إغلاق مركز: ${asset}*\n\n` + `*النتيجة النهائية للصفقة:* ${finalPnl >= 0 ? '🟢⬆️' : '🔴⬇️'} \`${finalPnl >= 0 ? '+' : ''}${formatNumber(finalPnl)}\` (\`${finalPnl >= 0 ? '+' : ''}${formatNumber(finalPnlPercent)}%\`)`;
-            
             const closeDate = new Date();
             const openDate = new Date(position.openDate);
             const durationDays = (closeDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24);
             const avgSellPrice = position.totalAmountSold > 0 ? position.realizedValue / position.totalAmountSold : 0;
-            const tradeRecord = { asset, pnl: finalPnl, pnlPercent: finalPnlPercent, openDate, closeDate, durationDays, avgBuyPrice: position.avgBuyPrice, avgSellPrice };
-            await saveClosedTrade(tradeRecord);
+
+            const closeReportData = {
+                asset,
+                pnl: finalPnl,
+                pnlPercent: finalPnlPercent,
+                durationDays,
+                avgBuyPrice: position.avgBuyPrice,
+                avgSellPrice,
+                highestPrice: position.highestPrice,
+                lowestPrice: position.lowestPrice
+            };
             
+            await saveClosedTrade(closeReportData);
+            analysisResult = { type: 'close', data: closeReportData };
             delete positions[asset];
+
+        } else {
+             analysisResult.type = 'trade';
         }
     }
+    
     await savePositions(positions);
-    return report;
+    analysisResult.data = { ...analysisResult.data, updatedPosition: positions[asset] || null };
+    return { analysisResult };
 }
 
 async function monitorBalanceChanges() {
@@ -485,16 +586,19 @@ async function monitorBalanceChanges() {
         await sendDebugMessage("Checking balance changes...");
         const previousState = await loadBalanceState();
         const previousBalances = previousState.balances || {};
+        const oldTotalValue = previousState.totalValue || 0;
+        
         const currentBalance = await getBalanceForComparison();
         if (!currentBalance) return;
+        
         const prices = await getMarketPrices();
         if (!prices) return;
         
-        const { assets: currentAssets, total: newTotalPortfolioValue } = await getPortfolio(prices);
-        if (newTotalPortfolioValue === undefined) return;
+        const { assets: newAssets, total: newTotalValue, usdtValue: newUsdtValue } = await getPortfolio(prices);
+        if (newTotalValue === undefined) return;
 
         if (Object.keys(previousBalances).length === 0) {
-            await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
+            await saveBalanceState({ balances: currentBalance, totalValue: newTotalValue });
             return;
         }
 
@@ -503,46 +607,109 @@ async function monitorBalanceChanges() {
 
         for (const asset of allAssets) {
             if (asset === 'USDT') continue;
+            
             const prevAmount = previousBalances[asset] || 0;
             const currAmount = currentBalance[asset] || 0;
             const difference = currAmount - prevAmount;
             const priceData = prices[`${asset}-USDT`];
+
             if (!priceData || !priceData.price || isNaN(priceData.price) || Math.abs(difference * priceData.price) < 1) continue;
 
             stateNeedsUpdate = true;
-            const closeReport = await updatePositionAndAnalyze(asset, difference, priceData.price, currAmount);
-            if (closeReport) {
-                await bot.api.sendMessage(AUTHORIZED_USER_ID, closeReport, { parse_mode: "Markdown" });
-                 const settings = await loadSettings();
-                if (settings.autoPostToChannel) {
-                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, closeReport, { parse_mode: "Markdown" });
-                } else {
-                    const confirmationKeyboard = new InlineKeyboard().text("✅ نشر التقرير", "publish_report").text("❌ تجاهل", "ignore_report");
-                    const hiddenMarker = `\n<REPORT>${JSON.stringify(closeReport)}</REPORT>`;
-                    await bot.api.sendMessage(AUTHORIZED_USER_ID, `*هل تود نشر تقرير إغلاق المركز؟*${hiddenMarker}`, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
-                }
-                continue;
-            }
-            
-            const tradeType = difference > 0 ? "شراء 🟢" : "بيع جزئي 🟠";
+            const { analysisResult } = await updatePositionAndAnalyze(asset, difference, priceData.price, currAmount);
+            if (analysisResult.type === 'none') continue;
+
             const tradeValue = Math.abs(difference) * priceData.price;
-            const privateAnalysisText = `🔔 **رصد حركة تداول**\n\n` + `🔸 *العملية:* ${tradeType}\n` + `🔸 *الأصل:* \`${asset}/USDT\`\n` + `🔸 *قيمة الصفقة:* \`$${formatNumber(tradeValue)}\`\n` + `🔸 *سعر التنفيذ:* \`$${formatNumber(priceData.price, 4)}\``;
+            const newAssetData = newAssets.find(a => a.asset === asset);
+            const newAssetValue = newAssetData ? newAssetData.value : 0;
+            const newAssetWeight = newTotalValue > 0 ? (newAssetValue / newTotalValue) * 100 : 0;
+            const newCashPercent = newTotalValue > 0 ? (newUsdtValue / newTotalValue) * 100 : 0;
+
+            const baseDetails = {
+                tradeType: difference > 0 ? "شراء" : (analysisResult.type === 'close' ? "إغلاق الصفقة" : "بيع جزئي"),
+                tradeEmoji: difference > 0 ? "🟢" : (analysisResult.type === 'close' ? "🔴" : "🟠"),
+                asset: asset,
+                price: priceData.price,
+                amountChange: difference,
+                tradeValue: tradeValue,
+                oldTotalValue: oldTotalValue,
+                newAssetWeight: newAssetWeight,
+                newUsdtValue: newUsdtValue,
+                newCashPercent: newCashPercent,
+                position: analysisResult.data.updatedPosition,
+                oldUsdtValue: previousState.balances['USDT'] || 0,
+                tradeSizePercent: oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0,
+                isClose: analysisResult.type === 'close',
+                closeReportData: analysisResult.type === 'close' ? analysisResult.data : null
+            };
 
             const settings = await loadSettings();
-            if (settings.autoPostToChannel) {
-                 await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, privateAnalysisText, { parse_mode: "Markdown" });
+
+            if (analysisResult.type === 'close') {
+                const privateReport = formatPrivateCloseReport(analysisResult.data);
+                const publicReport = formatPublicChannelPost(baseDetails);
+                if (settings.autoPostToChannel) {
+                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicReport, { parse_mode: "Markdown" });
+                    await bot.api.sendMessage(AUTHORIZED_USER_ID, privateReport, { parse_mode: "Markdown" });
+                } else {
+                    const confirmationKeyboard = new InlineKeyboard().text("✅ نعم، انشر التقرير", "publish_report").text("❌ لا، تجاهل", "ignore_report");
+                    const hiddenMarker = `\n<REPORT>${JSON.stringify(publicReport)}</REPORT>`;
+                    const confirmationMessage = `*تم إغلاق المركز بنجاح. هل تود نشر الملخص في القناة؟*\n\n${privateReport}${hiddenMarker}`;
+                    await bot.api.sendMessage(AUTHORIZED_USER_ID, confirmationMessage, { parse_mode: "Markdown", reply_markup: confirmationKeyboard });
+                }
+            } else if (analysisResult.type === 'trade') {
+                const privateReport = formatPrivateTradeAnalysis(baseDetails);
+                await bot.api.sendMessage(AUTHORIZED_USER_ID, privateReport, { parse_mode: "Markdown" });
+                if (settings.autoPostToChannel) {
+                    const publicReport = formatPublicChannelPost(baseDetails);
+                    await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicReport, { parse_mode: "Markdown" });
+                }
             }
-            await bot.api.sendMessage(AUTHORIZED_USER_ID, privateAnalysisText, { parse_mode: "Markdown" });
         }
 
         if (stateNeedsUpdate) {
-            await saveBalanceState({ balances: currentBalance, totalValue: newTotalPortfolioValue });
+            await saveBalanceState({ balances: currentBalance, totalValue: newTotalValue });
             await sendDebugMessage("State updated after balance change.");
         }
     } catch (e) {
         console.error("CRITICAL ERROR in monitorBalanceChanges:", e);
     }
 }
+
+
+async function trackPositionHighLow() {
+    try {
+        const positions = await loadPositions();
+        if (Object.keys(positions).length === 0) return;
+
+        const prices = await getMarketPrices();
+        if (!prices) return;
+
+        let positionsUpdated = false;
+        for (const symbol in positions) {
+            const position = positions[symbol];
+            const currentPrice = prices[`${symbol}-USDT`]?.price;
+            if (currentPrice) {
+                if (!position.highestPrice || currentPrice > position.highestPrice) {
+                    position.highestPrice = currentPrice;
+                    positionsUpdated = true;
+                }
+                if (!position.lowestPrice || currentPrice < position.lowestPrice) {
+                    position.lowestPrice = currentPrice;
+                    positionsUpdated = true;
+                }
+            }
+        }
+
+        if (positionsUpdated) {
+            await savePositions(positions);
+            await sendDebugMessage("Updated position high/low prices.");
+        }
+    } catch(e) {
+        console.error("CRITICAL ERROR in trackPositionHighLow:", e);
+    }
+}
+
 
 async function checkPriceAlerts() {
     try {
@@ -597,7 +764,7 @@ async function checkPriceMovements() {
                     const movementText = changePercent > 0 ? 'صعود' : 'هبوط';
                     const message = `📈 *تنبيه حركة سعر لأصل!* \`${asset.asset}\`\n*الحركة:* ${movementText} بنسبة \`${formatNumber(changePercent)}%\`\n*السعر الحالي:* \`$${formatNumber(asset.price, 4)}\``;
                     await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" });
-                    priceTracker.assets[asset.asset] = asset.price; // Update price in tracker
+                    priceTracker.assets[asset.asset] = asset.price; 
                     trackerUpdated = true;
                 }
             } else {
@@ -650,7 +817,6 @@ async function runHourlyJobs() {
     }
 }
 
-// --- NEW: Background job for virtual trades (integrated from v94) ---
 async function monitorVirtualTrades() {
     const activeTrades = await getActiveVirtualTrades();
     if (activeTrades.length === 0) return;
@@ -668,7 +834,7 @@ async function monitorVirtualTrades() {
 
         if (currentPrice >= trade.targetPrice) {
             finalPrice = trade.targetPrice;
-            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Correct PNL calculation
+            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
             finalStatus = 'completed';
             const profitPercent = (pnl / trade.virtualAmount) * 100;
             const msg = `🎯 *الهدف تحقق (توصية افتراضية)!* ✅\n\n` +
@@ -680,7 +846,7 @@ async function monitorVirtualTrades() {
         }
         else if (currentPrice <= trade.stopLossPrice) {
             finalPrice = trade.stopLossPrice;
-            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Correct PNL calculation
+            pnl = (finalPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
             finalStatus = 'stopped';
             const lossPercent = (pnl / trade.virtualAmount) * 100;
             const msg = `🛑 *تم تفعيل وقف الخسارة (توصية افتراضية)!* 🔻\n\n` +
@@ -702,15 +868,13 @@ async function monitorVirtualTrades() {
 // SECTION 5: BOT SETUP, KEYBOARDS, AND HANDLERS
 // =================================================================
 
-// Modified mainKeyboard to replace "أفضل 5 أصول" with "توصية افتراضية"
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
-    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row() // Replaced "🏆 أفضل 5 أصول"
+    .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row()
     .text("⚡ إحصائيات سريعة").text("ℹ️ معلومات عملة").row()
     .text("🔔 ضبط تنبيه").text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").resized();
 
-// NEW Keyboard for virtual trades (integrated from v94)
 const virtualTradeKeyboard = new InlineKeyboard()
     .text("➕ إضافة توصية جديدة", "add_virtual_trade").row()
     .text("📈 متابعة التوصيات الحية", "track_virtual_trades");
@@ -751,7 +915,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v96 - Definitive Merge: Stable v83 + Virtual Trades*\n\n` +
+        `*الإصدار: v99 - Final Report Restoration & Price Tracking*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -814,27 +978,32 @@ bot.on("callback_query:data", async (ctx) => {
     }
 
     if (data === "publish_report" || data === "ignore_report") {
-        const originalText = ctx.callbackQuery.message.text;
-        if(data === "publish_report") {
+        const originalMessage = ctx.callbackQuery.message;
+        const originalText = originalMessage.text;
+        
+        if (data === "publish_report") {
             const markerStart = originalText.indexOf("<REPORT>");
             const markerEnd = originalText.indexOf("</REPORT>");
             if (markerStart !== -1 && markerEnd !== -1) {
                 try {
                     const reportContent = JSON.parse(originalText.substring(markerStart + 8, markerEnd));
                     await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, reportContent, { parse_mode: "Markdown" });
-                    await ctx.editMessageText("✅ تم نشر التقرير بنجاح.", { reply_markup: undefined });
+                    // Edit the original confirmation message
+                    const newText = originalText.substring(0, originalText.indexOf("<REPORT>")).replace('*هل تود نشر الملخص في القناة؟*', '✅ *تم نشر التقرير بنجاح في القناة.*');
+                    await ctx.editMessageText(newText, { reply_markup: undefined, parse_mode: 'Markdown' });
+
                 } catch (e) {
                      await ctx.editMessageText("❌ فشل نشر التقرير.", { reply_markup: undefined });
                 }
             }
         } else {
-            await ctx.editMessageText("❌ تم تجاهل النشر.", { reply_markup: undefined });
+            const newText = originalText.substring(0, originalText.indexOf("<REPORT>")).replace('*هل تود نشر الملخص في القناة؟*', '❌ *تم تجاهل نشر التقرير.*');
+            await ctx.editMessageText(newText, { reply_markup: undefined, parse_mode: 'Markdown' });
         }
         return;
     }
     
     switch(data) {
-        // --- NEW Virtual Trade Callbacks (integrated from v94) ---
         case "add_virtual_trade":
             waitingState = 'add_virtual_trade';
             await ctx.editMessageText(
@@ -863,7 +1032,7 @@ bot.on("callback_query:data", async (ctx) => {
                 if (!currentPrice) {
                     reportMsg += `*${trade.instId}:* \`لا يمكن جلب السعر الحالي.\`\n`;
                 } else {
-                    const pnl = (currentPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice); // Corrected PNL calculation
+                    const pnl = (currentPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
                     const pnlPercent = (pnl / trade.virtualAmount) * 100;
                     const sign = pnl >= 0 ? '+' : '';
                     const emoji = pnl >= 0 ? '🟢' : '🔴';
@@ -879,8 +1048,6 @@ bot.on("callback_query:data", async (ctx) => {
             }
             await ctx.editMessageText(reportMsg, { parse_mode: "Markdown", reply_markup: virtualTradeKeyboard });
             break;
-
-        // --- Existing Settings Callbacks (from v83) ---
         case "set_capital": waitingState = 'set_capital'; await ctx.editMessageText("💰 يرجى إرسال المبلغ الجديد لرأس المال (رقم فقط)."); break;
         case "back_to_settings": await sendSettingsMenu(ctx); break;
         case "manage_movement_alerts": await sendMovementAlertsMenu(ctx); break;
@@ -929,7 +1096,7 @@ bot.on("message:text", async (ctx) => {
         const state = waitingState;
         waitingState = null;
         switch (state) {
-            case 'add_virtual_trade': // Integrated from v94
+            case 'add_virtual_trade':
                 try {
                     const lines = text.split('\n').map(line => line.trim());
                     if (lines.length < 5) throw new Error("التنسيق غير صحيح، يجب أن يتكون من 5 أسطر.");
@@ -957,7 +1124,6 @@ bot.on("message:text", async (ctx) => {
                     await ctx.reply(`❌ *خطأ في إضافة التوصية:*\n${e.message}\n\nالرجاء المحاولة مرة أخرى بالتنسيق الصحيح.`);
                 }
                 return;
-            
             case 'set_capital':
                 const amount = parseFloat(text);
                 if (!isNaN(amount) && amount >= 0) {
@@ -992,7 +1158,7 @@ bot.on("message:text", async (ctx) => {
             case 'confirm_delete_all':
                 if (text === 'تأكيد الحذف') {
                     await getCollection("configs").deleteMany({});
-                    await getCollection("virtualTrades").deleteMany({}); // Also delete virtual trades
+                    await getCollection("virtualTrades").deleteMany({});
                     await ctx.reply("✅ تم حذف جميع بياناتك.");
                 } else await ctx.reply("❌ تم إلغاء الحذف.");
                 return;
@@ -1071,7 +1237,6 @@ bot.on("message:text", async (ctx) => {
     }
     
     let portfolioData;
-    // Helper function to fetch portfolio data once per interaction if needed multiple times
     const fetchPortfolioData = async () => {
         if (!portfolioData) {
             const prices = await getMarketPrices();
@@ -1096,7 +1261,7 @@ bot.on("message:text", async (ctx) => {
             const marketMsg = await formatAdvancedMarketAnalysis();
             await ctx.reply(marketMsg, { parse_mode: "Markdown" });
             break;
-        case "💡 توصية افتراضية": // Handles the new virtual trade feature
+        case "💡 توصية افتراضية":
             await ctx.reply("اختر الإجراء المطلوب للتوصيات الافتراضية:", { reply_markup: virtualTradeKeyboard });
             break;
         case "⚡ إحصائيات سريعة":
@@ -1124,6 +1289,13 @@ bot.on("message:text", async (ctx) => {
         case "🧮 حاسبة الربح والخسارة":
             await ctx.reply("✍️ لحساب الربح/الخسارة، استخدم أمر `/pnl` بالصيغة التالية:\n`/pnl <سعر الشراء> <سعر البيع> <الكمية>`", {parse_mode: "Markdown"});
             break;
+        case "🏆 أفضل 5 أصول":
+             await ctx.reply("⏳ جاري تحليل الأصول...");
+             const { assets: topAssets, error: topAssetsError } = await fetchPortfolioData();
+             if (topAssetsError) return await ctx.reply(topAssetsError);
+             const topAssetsMsg = await formatTop5Assets(topAssets);
+             await ctx.reply(topAssetsMsg, { parse_mode: "Markdown" });
+             break;
     }
 });
 
@@ -1138,11 +1310,12 @@ async function startBot() {
         await connectDB();
         console.log("MongoDB connected.");
 
-        // Schedule background jobs (including NEW monitorVirtualTrades)
+        // Schedule background jobs
         setInterval(monitorBalanceChanges, 60_000);
         setInterval(checkPriceAlerts, 30_000);
         setInterval(checkPriceMovements, 60_000); 
-        setInterval(monitorVirtualTrades, 30_000); // NEW: Virtual trades monitor
+        setInterval(trackPositionHighLow, 60_000); // NEW: Job to track high/low prices
+        setInterval(monitorVirtualTrades, 30_000);
         setInterval(runHourlyJobs, 3_600_000);
         setInterval(runDailyJobs, 86_400_000);
 
@@ -1160,5 +1333,4 @@ async function startBot() {
     }
 }
 
-// Start the bot after all functions are defined
 startBot();
