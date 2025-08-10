@@ -1,19 +1,16 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v115 (The Final, Stable Build)
+// OKX Advanced Analytics Bot - v116 (Final Webhook Handler Fix)
 // =================================================================
 
 const express = require("express");
-const { Bot, Keyboard, GrammyError, HttpError } = require("grammy");
+const { Bot, Keyboard, GrammyError, HttpError, webhookCallback } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const { connectDB, getDB } = require("./database.js");
 
 // --- Bot Setup ---
-const app = express();
-app.use(express.json());
-
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
-const AUTHORIZED_USER_ID = process.env.AUTHORIZED_USER_ID; // استخدمه كنص لضمان عدم حدوث مشاكل
+const AUTHORIZED_USER_ID = process.env.AUTHORIZED_USER_ID;
 const API_BASE_URL = "https://www.okx.com";
 let waitingState = null;
 
@@ -120,7 +117,7 @@ async function getPortfolio(prices) {
 }
 
 async function formatPortfolioMsg(assets, total, capital) {
-    let msg = `🧾 *التقرير التحليلي للمحفظة (v115)*\n\n`;
+    let msg = `🧾 *التقرير التحليلي للمحفظة (v116)*\n\n`;
     msg += `*القيمة الإجمالية:* \`$${formatNumber(total)}\`\n`;
     msg += `*رأس المال:* \`$${formatNumber(capital)}\`\n`;
     const pnl = capital > 0 ? total - capital : 0;
@@ -138,17 +135,14 @@ async function formatPortfolioMsg(assets, total, capital) {
 const mainKeyboard = new Keyboard().text("📊 عرض المحفظة").text("⚙️ الإعدادات").row().resized();
 
 bot.use(async (ctx, next) => {
-    // التحقق من المستخدم المصرح له
     if (String(ctx.from?.id) === String(AUTHORIZED_USER_ID)) {
         await next();
     } else {
         console.log(`Unauthorized access attempt from ID: ${ctx.from?.id}`);
-        // يمكنك إرسال رد للمستخدم غير المصرح له إذا أردت
-        // await ctx.reply("You are not authorized to use this bot.");
     }
 });
 
-bot.command("start", (ctx) => ctx.reply("أهلاً بك. الإصدار النهائي v115 جاهز.", { reply_markup: mainKeyboard }));
+bot.command("start", (ctx) => ctx.reply("أهلاً بك. الإصدار النهائي v116 جاهز.", { reply_markup: mainKeyboard }));
 
 bot.on("message:text", async (ctx) => {
     const text = ctx.message.text;
@@ -166,17 +160,22 @@ bot.on("message:text", async (ctx) => {
     switch (text) {
         case "📊 عرض المحفظة":
             const loadingMsg = await ctx.reply("⏳ جاري إعداد التقرير...");
-            const prices = await getMarketPrices();
-            if (!prices) {
-                return ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق.");
+            try {
+                const prices = await getMarketPrices();
+                if (!prices) {
+                    return ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق.");
+                }
+                const capital = await loadCapital();
+                const portfolio = await getPortfolio(prices);
+                if (portfolio.error) {
+                    return ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`);
+                }
+                const msg = await formatPortfolioMsg(portfolio.assets, portfolio.total, capital);
+                await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
+            } catch(e) {
+                 console.error("Error in 'عرض المحفظة' handler:", e);
+                 await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ حدث خطأ داخلي أثناء عرض المحفظة.");
             }
-            const capital = await loadCapital();
-            const portfolio = await getPortfolio(prices);
-            if (portfolio.error) {
-                return ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`);
-            }
-            const msg = await formatPortfolioMsg(portfolio.assets, portfolio.total, capital);
-            await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
             break;
         case "⚙️ الإعدادات":
             waitingState = 'set_capital';
@@ -187,31 +186,36 @@ bot.on("message:text", async (ctx) => {
 
 bot.catch((err) => {
     const ctx = err.ctx;
-    console.error(`!!! BOT ERROR caught while handling update ${ctx.update.update_id}:`, err.error);
+    console.error(`--- BOT ERROR ---`);
+    console.error(`Update ID: ${ctx.update.update_id}`);
+    console.error(err.error);
+    console.error(`--- END BOT ERROR ---`);
 });
 
 // =================================================================
-// SECTION 3: VERCEL SERVER HANDLER (FINAL VERSION)
+// SECTION 3: VERCEL SERVER HANDLER (ROBUST VERSION)
 // =================================================================
+const app = express();
+app.use(express.json());
+
+// Initialize DB connection once.
+connectDB();
+
+// The official, recommended way to handle webhooks with express
+const webhookHandler = webhookCallback(bot, "express");
+
+app.post("/api/bot", webhookHandler);
 
 app.get("/", (req, res) => {
-    res.status(200).send("Bot v115 is alive.");
+    res.status(200).send("Bot v116 is alive and webhook is ready.");
 });
 
-app.post("/api/bot", async (req, res) => {
-    try {
-        await bot.handleUpdate(req.body, res);
-    } catch (e) {
-        console.error("Error in webhook root handler:", e);
-        if (!res.headersSent) {
-            res.status(500).send("Error processing update");
-        }
+// General error handler for express
+app.use((err, req, res, next) => {
+    console.error("--- EXPRESS ERROR ---", err);
+    if (!res.headersSent) {
+        res.status(500).send("Something broke!");
     }
 });
 
-// تأكد من أن قاعدة البيانات متصلة عند بدء تشغيل الخادم
-connectDB();
-
-// تصدير التطبيق لـ Vercel
 module.exports = app;
-
