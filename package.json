@@ -1,6 +1,6 @@
 {
-  "name": "okx-bot-upstash",
-  "version": "2.0.0",
+  "name": "okx-bot-upstash-final",
+  "version": "2.1.0",
   "description": "OKX Analytics Bot with Upstash Redis",
   "main": "index.js",
   "scripts": {
@@ -9,9 +9,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@upstash/redis": "^1.31.5",
     "express": "^4.19.2",
     "grammy": "^1.24.0",
-    "@upstash/redis": "^1.31.5",
     "node-fetch": "^2.7.0"
   }
 }
