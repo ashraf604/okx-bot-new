@@ -1438,49 +1438,36 @@ bot.on("message:text", async (ctx) => {
             break;
     }
 });
-
-
 // =================================================================
-// SECTION 6: SERVER AND BOT INITIALIZATION
+// SECTION 6: SERVER AND BOT INITIALIZATION (FOR VERCEL)
 // =================================================================
 
-app.get("/healthcheck", (req, res) => res.status(200).send("OK"));
+// هذا الجزء يخبر Vercel بكيفية التعامل مع رسائل المستخدم القادمة من تيليجرام
+app.use(express.json());
 
-async function startBot() {
+// عند وصول أي طلب، نقوم بتمريره إلى مكتبة grammy لمعالجته
+app.use(async (req, res) => {
     try {
-        await connectDB();
-        console.log("MongoDB connected.");
-
-        // Schedule background jobs
-        setInterval(monitorBalanceChanges, 60 * 1000);
-        setInterval(trackPositionHighLow, 60 * 1000);
-        setInterval(checkPriceAlerts, 30 * 1000);
-        setInterval(checkPriceMovements, 60 * 1000);
-        setInterval(monitorVirtualTrades, 30 * 1000);
-        setInterval(runHourlyJobs, 60 * 60 * 1000);
-        setInterval(runDailyJobs, 24 * 60 * 60 * 1000);
-
-        // Initial data load to prevent empty state issues
-        await runHourlyJobs();
-        await runDailyJobs();
-        await monitorBalanceChanges();
-
-        if (process.env.NODE_ENV === "production") {
-            app.use(express.json());
-            app.use(webhookCallback(bot, "express"));
-            app.listen(PORT, () => {
-                console.log(`Bot server is running on port ${PORT}`);
-            });
-        } else {
-            console.log("Bot starting with polling...");
-            await bot.start();
-        }
-        console.log("Bot is now fully operational.");
-
-    } catch (e) {
-        console.error("FATAL: Could not start the bot.", e);
-        process.exit(1); 
+        await connectDB(); // تأكد من الاتصال بقاعدة البيانات مع كل طلب
+        await bot.handleUpdate(req.body, res);
+    } catch (error) {
+        console.error("Error handling update:", error);
+        res.sendStatus(500);
     }
-}
+});
 
-startBot();
+// قم بتصدير التطبيق كدالة serverless
+module.exports = app;
+
+// =================================================================
+// SECTION 7: EXPORTS FOR CRON JOB
+// =================================================================
+
+// لجعل وظائف المراقبة متاحة للملف الدوري الذي سننشئه لاحقًا
+module.exports.connectDB = connectDB;
+module.exports.monitorBalanceChanges = monitorBalanceChanges;
+module.exports.trackPositionHighLow = trackPositionHighLow;
+module.exports.checkPriceAlerts = checkPriceAlerts;
+module.exports.checkPriceMovements = checkPriceMovements;
+module.exports.monitorVirtualTrades = monitorVirtualTrades;
+
