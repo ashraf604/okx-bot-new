@@ -1,22 +1,20 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v106 (The Accountability Fix)
+// OKX Advanced Analytics Bot - v109 (Final Vercel Build)
 // =================================================================
 
 const express = require("express");
-const { Bot, Keyboard, InlineKeyboard, webhookCallback } = require("grammy");
+const { Bot, Keyboard, InlineKeyboard } = require("grammy");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
-require("dotenv").config();
 const { connectDB, getDB } = require("./database.js");
 
 // --- Bot Setup ---
 const app = express();
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
-const PORT = process.env.PORT || 3000;
 const AUTHORIZED_USER_ID = parseInt(process.env.AUTHORIZED_USER_ID);
 const API_BASE_URL = "https://www.okx.com";
 
-// --- State Variables ---
+// --- State Variable ---
 let waitingState = null;
 
 // =================================================================
@@ -57,7 +55,7 @@ async function getHistoricalPerformance(asset) {
         if (history.length === 0) {
             return { realizedPnl: 0, tradeCount: 0, winningTrades: 0, losingTrades: 0, avgDuration: 0 };
         }
-
+        
         const realizedPnl = history.reduce((sum, trade) => sum + trade.pnl, 0);
         const winningTrades = history.filter(trade => trade.pnl > 0).length;
         const losingTrades = history.filter(trade => trade.pnl <= 0).length;
@@ -185,7 +183,7 @@ async function getPortfolio(prices) {
         if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) {
             return { error: `فشل جلب المحفظة: ${json.msg || 'بيانات غير متوقعة من المنصة'}` };
         }
-
+        
         let assets = [], total = 0, usdtValue = 0;
         json.data[0].details.forEach(asset => {
             const amount = parseFloat(asset.eq);
@@ -204,7 +202,7 @@ async function getPortfolio(prices) {
                 }
             }
         });
-
+        
         assets.sort((a, b) => b.value - a.value);
         return { assets, total, usdtValue };
     } catch (e) {
@@ -219,7 +217,7 @@ async function getBalanceForComparison() {
         const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) });
         const json = await res.json();
         if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) return null;
-
+        
         const balanceMap = {};
         json.data[0].details.forEach(asset => {
             balanceMap[asset.ccy] = parseFloat(asset.eq);
@@ -353,7 +351,7 @@ function formatPrivateBuy(details) {
 function formatPrivateSell(details) {
     const { asset, price, amountChange, tradeValue, oldTotalValue, newAssetWeight, newUsdtValue, newCashPercent } = details;
     const tradeSizePercent = oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0;
-
+    
     let msg = `*مراقبة الأصول 🔬:*\n**مناورة تكتيكية 🟠**\n━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `🔸 **الأصل المستهدف:** \`${asset}/USDT\`\n`;
     msg += `🔸 **نوع العملية:** تخفيف المركز / جني أرباح جزئي\n`;
@@ -411,7 +409,7 @@ function formatPublicSell(details) {
     const { asset, price, amountChange, position } = details;
     const totalPositionAmountBeforeSale = position.totalAmountBought - (position.totalAmountSold - Math.abs(amountChange));
     const soldPercent = totalPositionAmountBeforeSale > 0 ? (Math.abs(amountChange) / totalPositionAmountBeforeSale) * 100 : 0;
-
+    
     const partialPnl = (price - position.avgBuyPrice);
     const partialPnlPercent = position.avgBuyPrice > 0 ? (partialPnl / position.avgBuyPrice) * 100 : 0;
 
@@ -447,7 +445,7 @@ function formatPublicClose(details) {
         msg += `الخروج بانضباط وفقًا للخطة هو نجاح بحد ذاته. نحافظ على رأس المال للفرصة القادمة.\n`;
     }
     msg += `\nنبارك لمن اتبع التوصية. نستعد الآن للبحث عن الفرصة التالية.\n`;
-    msg += `#نتائجتوصيات #${asset}`;
+    msg += `#نتائج_توصيات #${asset}`;
     return msg;
 }
 
@@ -526,7 +524,7 @@ async function formatAdvancedMarketAnalysis() {
 
     marketData.sort((a, b) => b.volCcy24h - a.volCcy24h);
     const highVolume = marketData.slice(0, 5);
-
+    
     let msg = `🚀 *تحليل السوق المتقدم* | ${new Date().toLocaleDateString("ar-EG")}\n━━━━━━━━━━━━━━━━━━━\n\n`;
     msg += "📈 *أكبر الرابحين (24س):*\n" + topGainers.map(c => `  - \`${c.instId}\`: \`+${formatNumber(c.change24h * 100)}%\``).join('\n') + "\n\n";
     msg += "📉 *أكبر الخاسرين (24س):*\n" + topLosers.map(c => `  - \`${c.instId}\`: \`${formatNumber(c.change24h * 100)}%\``).join('\n') + "\n\n";
@@ -550,12 +548,12 @@ async function formatQuickStats(assets, total, capital) {
 }
 
 // =================================================================
-// SECTION 4: BACKGROUND JOBS
+// SECTION 4: BACKGROUND JOBS (MONITORING FUNCTIONS)
 // =================================================================
 
 async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmount) {
     if (!asset || price === undefined || price === null || isNaN(price)) return { analysisResult: null };
-
+    
     const positions = await loadPositions();
     let position = positions[asset];
     let analysisResult = { type: 'none', data: {} };
@@ -581,7 +579,7 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
     } else if (amountChange < 0 && position) { // Sell
         position.realizedValue += (Math.abs(amountChange) * price);
         position.totalAmountSold += Math.abs(amountChange);
-
+        
         if (newTotalAmount * price < 1) { // Position Closed
             const finalPnl = position.realizedValue - position.totalCost;
             const finalPnlPercent = position.totalCost > 0 ? (finalPnl / position.totalCost) * 100 : 0;
@@ -593,14 +591,14 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
             const closeReportData = {
                 asset,
                 pnl: finalPnl,
-                pnlPercent: finalPnlPercent, // ✅ THIS IS THE FIX
+                pnlPercent: finalPnlPercent,
                 durationDays,
                 avgBuyPrice: position.avgBuyPrice,
                 avgSellPrice,
                 highestPrice: position.highestPrice,
                 lowestPrice: position.lowestPrice
             };
-
+            
             await saveClosedTrade(closeReportData);
             analysisResult = { type: 'close', data: closeReportData };
             delete positions[asset];
@@ -609,7 +607,7 @@ async function updatePositionAndAnalyze(asset, amountChange, price, newTotalAmou
              analysisResult.type = 'sell';
         }
     }
-
+    
     await savePositions(positions);
     analysisResult.data.position = positions[asset] || position; 
     return { analysisResult };
@@ -622,13 +620,13 @@ async function monitorBalanceChanges() {
         const previousBalances = previousState.balances || {};
         const oldTotalValue = previousState.totalValue || 0;
         const oldUsdtValue = previousBalances['USDT'] || 0;
-
+        
         const currentBalance = await getBalanceForComparison();
         if (!currentBalance) return;
-
+        
         const prices = await getMarketPrices();
         if (!prices) return;
-
+        
         const { assets: newAssets, total: newTotalValue, usdtValue: newUsdtValue } = await getPortfolio(prices);
         if (newTotalValue === undefined) return;
 
@@ -642,7 +640,7 @@ async function monitorBalanceChanges() {
 
         for (const asset of allAssets) {
             if (asset === 'USDT') continue;
-
+            
             const prevAmount = previousBalances[asset] || 0;
             const currAmount = currentBalance[asset] || 0;
             const difference = currAmount - prevAmount;
@@ -707,7 +705,6 @@ async function monitorBalanceChanges() {
     }
 }
 
-
 async function trackPositionHighLow() {
     try {
         const positions = await loadPositions();
@@ -740,7 +737,6 @@ async function trackPositionHighLow() {
         console.error("CRITICAL ERROR in trackPositionHighLow:", e);
     }
 }
-
 
 async function checkPriceAlerts() {
     try {
@@ -806,45 +802,6 @@ async function checkPriceMovements() {
         if (trackerUpdated) await savePriceTracker(priceTracker);
     } catch (e) {
         console.error("CRITICAL ERROR in checkPriceMovements:", e);
-    }
-}
-
-async function runDailyJobs() {
-    try {
-        const settings = await loadSettings();
-        if (!settings.dailySummary) return;
-        const prices = await getMarketPrices();
-        if (!prices) return;
-        const { total } = await getPortfolio(prices);
-        if (total === undefined) return;
-        const history = await loadHistory();
-        const date = new Date().toISOString().slice(0, 10);
-        const todayIndex = history.findIndex(h => h.date === date);
-        if (todayIndex > -1) history[todayIndex].total = total;
-        else history.push({ date, total });
-        if (history.length > 35) history.shift();
-        await saveHistory(history);
-        console.log(`[Daily Summary Recorded]: ${date} - $${formatNumber(total)}`);
-    } catch (e) {
-        console.error("CRITICAL ERROR in runDailyJobs:", e);
-    }
-}
-
-async function runHourlyJobs() {
-    try {
-        const prices = await getMarketPrices();
-        if (!prices) return;
-        const { total } = await getPortfolio(prices);
-        if (total === undefined) return;
-        const history = await loadHourlyHistory();
-        const hourLabel = new Date().toISOString().slice(0, 13);
-        const existingIndex = history.findIndex(h => h.label === hourLabel);
-        if (existingIndex > -1) history[existingIndex].total = total;
-        else history.push({ label: hourLabel, total });
-        if (history.length > 72) history.splice(0, history.length - 72);
-        await saveHourlyHistory(history);
-    } catch (e) {
-        console.error("Error in hourly jobs:", e);
     }
 }
 
@@ -954,7 +911,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v106 - The Accountability Fix*\n\n` +
+        `*الإصدار: v109 - Final Vercel Build*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -1013,7 +970,7 @@ bot.on("callback_query:data", async (ctx) => {
             } else {
                 return;
             }
-
+            
             if (!periodData || periodData.length < 2) { 
                 await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); 
                 return; 
@@ -1023,7 +980,7 @@ bot.on("callback_query:data", async (ctx) => {
                 await ctx.editMessageText("ℹ️ لا توجد بيانات كافية لهذه الفترة."); 
                 return; 
             }
-
+            
             const chartUrl = createChartUrl(periodData, periodLabel, stats.pnl);
             const pnlSign = stats.pnl >= 0 ? '+' : '';
             const caption = `📊 *تحليل أداء المحفظة | ${periodLabel}*\n\n` +
@@ -1044,10 +1001,10 @@ bot.on("callback_query:data", async (ctx) => {
             if (!originalMessage) return;
             const originalText = originalMessage.text;
             const reportMarkerIndex = originalText.indexOf("<REPORT>");
-
+            
             if (reportMarkerIndex !== -1) {
                 const privatePart = originalText.substring(0, reportMarkerIndex);
-
+                
                 if (data === "publish_report") {
                     const markerStart = originalText.indexOf("<REPORT>");
                     const markerEnd = originalText.indexOf("</REPORT>");
@@ -1065,7 +1022,7 @@ bot.on("callback_query:data", async (ctx) => {
             }
             return;
         }
-
+        
         switch(data) {
             case "add_virtual_trade":
                 waitingState = 'add_virtual_trade';
@@ -1191,7 +1148,7 @@ bot.on("message:text", async (ctx) => {
     if (waitingState) {
         const state = waitingState;
         waitingState = null;
-
+        
         switch (state) {
             case 'add_virtual_trade':
                 try {
@@ -1203,7 +1160,7 @@ bot.on("message:text", async (ctx) => {
                     const targetPrice = parseFloat(lines[2]);
                     const stopLossPrice = parseFloat(lines[3]);
                     const virtualAmount = parseFloat(lines[4]);
-
+                    
                     if (!instId.endsWith('-USDT')) throw new Error("رمز العملة يجب أن ينتهي بـ -USDT.");
                     if ([entryPrice, targetPrice, stopLossPrice, virtualAmount].some(isNaN)) {
                         throw new Error("تأكد من أن جميع القيم المدخلة هي أرقام صالحة.");
@@ -1327,14 +1284,14 @@ bot.on("message:text", async (ctx) => {
                         if(techAnalysis.sma20) msg += ` ▪️ *السعر* *${details.price > techAnalysis.sma20 ? 'فوق' : 'تحت'}* *SMA20* (\`$${formatNumber(techAnalysis.sma20, 4)}\`)\n`;
                         if(techAnalysis.sma50) msg += ` ▪️ *السعر* *${details.price > techAnalysis.sma50 ? 'فوق' : 'تحت'}* *SMA50* (\`$${formatNumber(techAnalysis.sma50, 4)}\`)`;
                     }
-
+                    
                     await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
                 } catch(e) {
                     console.error("Error fetching coin info:", e);
                     await ctx.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ حدث خطأ أثناء جلب البيانات: ${e.message}`);
                 }
                 return;
-
+            
             case 'set_alert':
                 const parts_alert = text.trim().split(/\s+/);
                 if (parts_alert.length !== 3) {
@@ -1370,7 +1327,7 @@ bot.on("message:text", async (ctx) => {
                 return;
         }
     }
-
+    
     switch (text) {
         case "📊 عرض المحفظة":
             const loadingMsgPortfolio = await ctx.reply("⏳ جاري إعداد التقرير...");
@@ -1441,7 +1398,7 @@ bot.on("message:text", async (ctx) => {
 
 
 // =================================================================
-// SECTION 6: VERCEL SERVERLESS HANDLER (THE FINAL FIX)
+// SECTION 6: VERCEL SERVERLESS HANDLER (THE FINAL, UNIFIED FIX)
 // =================================================================
 
 app.use(express.json());
@@ -1453,7 +1410,7 @@ const handler = async (req, res) => {
 
         // التحقق إذا كان الطلب من cron-job.org للمراقبة
         if (req.url.includes('/api/monitor')) {
-            console.log("Cron job triggered.");
+            console.log("Cron job triggered by external service.");
             await Promise.all([
                 monitorBalanceChanges(),
                 trackPositionHighLow(),
@@ -1464,13 +1421,23 @@ const handler = async (req, res) => {
             return res.status(200).send('Cron job executed successfully.');
         }
 
-        // إذا لم يكن طلب مراقبة، فهو طلب من تيليجرام
-        console.log("Webhook triggered by Telegram.");
-        await bot.handleUpdate(req.body, res);
+        // التحقق إذا كان الطلب من تيليجرام
+        if (req.url.includes('/api/bot')) {
+            console.log("Webhook triggered by Telegram.");
+            // تمرير الطلب إلى مكتبة grammy لمعالجته
+            await bot.handleUpdate(req.body);
+            // إرسال رد فوري لتيليجرام بأن الطلب تم استلامه بنجاح
+            return res.status(200).send('Update received.');
+        }
+        
+        // الرد الافتراضي للمسار الرئيسي
+        res.status(200).send("OKX Bot is alive and running.");
 
     } catch (error) {
-        console.error('Error in main handler:', error);
-        // لا ترسل أي رد في حالة الخطأ لتجنب تعارض الردود
+        console.error('CRITICAL ERROR in main handler:', error);
+        if (!res.headersSent) {
+            res.status(500).send('An internal server error occurred.');
+        }
     }
 };
 
