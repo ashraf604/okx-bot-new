@@ -1,34 +1,29 @@
-// database.js (The Corrected Version)
+// database.js (Upstash Redis Final Version)
 
-const { MongoClient } = require("mongodb");
+const { Redis } = require("@upstash/redis");
 
-let db;
-let client;
+let redis;
 
-async function connectDB() {
-    if (db) return db; // إذا كان الاتصال موجودًا بالفعل، أعد استخدامه
-
-    const uri = process.env.MONGO_URI;
-
-    if (!uri) {
-        console.error("FATAL ERROR: MONGO_URI is not defined in the environment variables.");
-        throw new Error("MONGO_URI is not defined. Please check your Vercel environment variables and redeploy.");
+// هذه هي الدالة الوحيدة التي نحتاجها للاتصال
+function connectDB() {
+    if (redis) {
+        return redis;
     }
-
-    client = new MongoClient(uri);
-
-    try {
-        await client.connect();
-        db = client.db("okxBotData"); // اسم قاعدة بياناتك
-        console.log("Successfully connected to MongoDB.");
-        return db;
-    } catch (e) {
-        console.error("Failed to connect to MongoDB", e);
-        // في بيئة serverless، لا نستخدم process.exit(1)
-        throw new Error("Failed to connect to MongoDB.");
-    }
+    
+    // Redis.fromEnv() ستقوم تلقائيًا بقراءة متغيرات البيئة KV_URL و KV_REST_API_TOKEN
+    // التي أضافتها Vercel. لا حاجة لكتابتها هنا.
+    redis = Redis.fromEnv();
+    
+    console.log("Successfully initialized Upstash Redis client.");
+    return redis;
 }
 
-const getDB = () => db;
+const getDB = () => {
+    if (!redis) {
+        // تأكد من أن الاتصال موجود دائمًا
+        return connectDB();
+    }
+    return redis;
+};
 
 module.exports = { connectDB, getDB };
