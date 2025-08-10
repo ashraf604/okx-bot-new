@@ -1,55 +1,34 @@
-// database.js
+// database.js (The Corrected Version)
 
 const { MongoClient } = require("mongodb");
 
-require("dotenv").config();
-
-
-
-const uri = process.env.MONGO_URI;
-
-if (!uri) {
-
-    throw new Error("MONGO_URI is not defined in your environment variables.");
-
-}
-
-
-
-const client = new MongoClient(uri);
-
 let db;
-
-
+let client;
 
 async function connectDB() {
+    if (db) return db; // إذا كان الاتصال موجودًا بالفعل، أعد استخدامه
 
-    if (db) return db;
+    const uri = process.env.MONGO_URI;
 
-    try {
+    if (!uri) {
+        console.error("FATAL ERROR: MONGO_URI is not defined in the environment variables.");
+        throw new Error("MONGO_URI is not defined. Please check your Vercel environment variables and redeploy.");
+    }
 
-        await client.connect();
+    client = new MongoClient(uri);
 
-        db = client.db("okxBotData"); // اسم قاعدة بياناتك
-
-        console.log("Successfully connected to MongoDB.");
-
-        return db;
-
-    } catch (e) {
-
-        console.error("Failed to connect to MongoDB", e);
-
-        process.exit(1);
-
-    }
-
+    try {
+        await client.connect();
+        db = client.db("okxBotData"); // اسم قاعدة بياناتك
+        console.log("Successfully connected to MongoDB.");
+        return db;
+    } catch (e) {
+        console.error("Failed to connect to MongoDB", e);
+        // في بيئة serverless، لا نستخدم process.exit(1)
+        throw new Error("Failed to connect to MongoDB.");
+    }
 }
 
-
-
 const getDB = () => db;
-
-
 
 module.exports = { connectDB, getDB };
