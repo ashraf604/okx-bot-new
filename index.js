@@ -21,9 +21,11 @@ let waitingState = null;
 // SECTION 1: DATABASE (UPSTASH REDIS) AND HELPER FUNCTIONS
 // =================================================================
 
+// SECTION 1: DATABASE (UPSTASH REDIS) AND HELPER FUNCTIONS
 let redis;
 function connectDB() {
     if (!redis) {
+        // هذا هو الجزء المهم للتأكد منه
         if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
             throw new Error("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set.");
         }
@@ -35,6 +37,7 @@ function connectDB() {
     }
     return redis;
 }
+
 
 function getDB() {
     if (!redis) return connectDB();
