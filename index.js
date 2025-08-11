@@ -25,19 +25,19 @@ let waitingState = null;
 let redis;
 function connectDB() {
     if (!redis) {
-        // هذا هو الجزء المهم للتأكد منه
-        if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
-            throw new Error("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set.");
+        // تم التعديل ليقرأ متغيرات Vercel KV مباشرة
+        if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) {
+            throw new Error("KV_REST_API_URL and KV_REST_API_TOKEN must be set in Vercel environment.");
         }
         redis = new Redis({
-            url: process.env.UPSTASH_REDIS_REST_URL,
-            token: process.env.UPSTASH_REDIS_REST_TOKEN,
+            // تم التعديل ليستخدم متغيرات Vercel KV مباشرة
+            url: process.env.KV_REST_API_URL,
+            token: process.env.KV_REST_API_TOKEN,
         });
-        console.log("Successfully connected to Upstash Redis.");
+        console.log("Successfully connected to Vercel KV (Redis).");
     }
     return redis;
 }
-
 
 function getDB() {
     if (!redis) return connectDB();
