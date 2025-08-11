@@ -1140,4 +1140,3 @@ async function startBot() {
 }
 
 startBot().catch(e => console.error("Failed to start bot:", e));
-</current_query>
