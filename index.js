@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v119 (The Final & Correct Vercel Handler)
+// OKX Advanced Analytics Bot - v120 (The Final & Complete Conscience Fix)
 // =================================================================
 
 const express = require("express");
@@ -15,6 +15,7 @@ const API_BASE_URL = "https://www.okx.com";
 
 // --- State Variables ---
 let waitingState = null;
+let statePayload = null; // To hold extra data for waiting states
 
 // =================================================================
 // SECTION 1: DATABASE (VERCEL KV) AND HELPER FUNCTIONS
@@ -40,7 +41,7 @@ function getDB() {
     return redis;
 }
 
-// ... All your database helper functions are here (getConfig, saveConfig, etc.)
+// All Database Helper Functions (adapted for Redis)
 async function getConfig(id, defaultValue = {}) { try { const data = await getDB().get(`config:${id}`); return data ? data : defaultValue; } catch (e) { console.error(`DB Error in getConfig for id: ${id}`, e); return defaultValue; } }
 async function saveConfig(id, data) { try { await getDB().set(`config:${id}`, data); } catch (e) { console.error(`DB Error in saveConfig for id: ${id}`, e); } }
 async function saveClosedTrade(tradeData) { try { await getDB().lpush("tradeHistory", JSON.stringify(tradeData)); } catch (e) { console.error("Error in saveClosedTrade:", e); } }
@@ -70,15 +71,13 @@ function formatNumber(num, decimals = 2) { const number = parseFloat(num); if (i
 async function sendDebugMessage(message) { const settings = await loadSettings(); if (settings.debugMode) { try { await bot.api.sendMessage(AUTHORIZED_USER_ID, `🐞 *Debug:* ${message}`, { parse_mode: "Markdown" }); } catch (e) { console.error("Failed to send debug message:", e); } } }
 function getHeaders(method, path, body = "") { const timestamp = new Date().toISOString(); const prehash = timestamp + method.toUpperCase() + path + (typeof body === 'object' ? JSON.stringify(body) : body); const sign = crypto.createHmac("sha256", process.env.OKX_API_SECRET_KEY).update(prehash).digest("base64"); return { "OK-ACCESS-KEY": process.env.OKX_API_KEY, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": timestamp, "OK-ACCESS-PASSPHRASE": process.env.OKX_API_PASSPHRASE, "Content-Type": "application/json", }; }
 
-
 // =================================================================
-// SECTIONS 2, 3, 4: ALL DATA, FORMATTING, AND BACKGROUND FUNCTIONS
-// This includes all your functions like getMarketPrices, formatPortfolioMsg, monitorBalanceChanges, etc.
-// They are correct and preserved. For brevity, they are not all pasted again.
+// SECTION 2, 3, 4: ALL DATA, FORMATTING, AND BACKGROUND FUNCTIONS
+// This section is complete and contains all original functions.
 // =================================================================
+// ... Includes getMarketPrices, getPortfolio, all format functions, all monitor functions, etc.
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices (OKX Error):", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => { if (t.instId.endsWith('-USDT')) { const lastPrice = parseFloat(t.last); const openPrice = parseFloat(t.open24h); let change24h = 0; if (openPrice > 0) change24h = (lastPrice - openPrice) / openPrice; prices[t.instId] = { price: lastPrice, open24h: openPrice, change24h, volCcy24h: parseFloat(t.volCcy24h) }; } }); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error.message); return null; } }
 async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) { return { error: `فشل جلب المحفظة: ${json.msg || 'بيانات غير متوقعة من المنصة'}` }; } let assets = [], total = 0, usdtValue = 0; json.data[0].details.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const value = amount * priceData.price; total += value; if (asset.ccy === "USDT") { usdtValue = value; } if (value >= 1) { assets.push({ asset: asset.ccy, price: priceData.price, value, amount, change24h: priceData.change24h }); } } }); assets.sort((a, b) => b.value - a.value); return { assets, total, usdtValue }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
-// ... and so on for all other functions in these sections...
 async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) return null; const balanceMap = {}; json.data[0].details.forEach(asset => { balanceMap[asset.ccy] = parseFloat(asset.eq); }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
 async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
 async function getHistoricalCandles(instId, limit = 100) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId}&bar=1D&limit=${limit}`); const json = await res.json(); if (json.code !== '0' || !json.data || json.data.length === 0) return []; return json.data.map(c => parseFloat(c[4])).reverse(); } catch (e) { console.error(`Exception in getHistoricalCandles for ${instId}:`, e); return []; } }
@@ -106,16 +105,30 @@ async function runHourlyJobs() { try { const prices = await getMarketPrices(); i
 async function monitorVirtualTrades() { const activeTrades = await getActiveVirtualTrades(); if (!activeTrades || activeTrades.length === 0) return; const prices = await getMarketPrices(); if (!prices) { console.error("Could not fetch prices for monitoring virtual trades."); return; } for (const trade of activeTrades) { const priceData = prices[trade.instId]; if (priceData && priceData.price) { const currentPrice = priceData.price; let status = 'active'; let finalPrice = null; if (trade.stopLoss && currentPrice <= trade.stopLoss) { status = 'closed_sl'; finalPrice = trade.stopLoss; } else if (trade.takeProfit && currentPrice >= trade.takeProfit) { status = 'closed_tp'; finalPrice = trade.takeProfit; } if (status !== 'active') { await updateVirtualTradeStatus(trade._id, status, finalPrice); await bot.api.sendMessage(AUTHORIZED_USER_ID, `🔔 *Virtual Trade Update:*\n- Asset: ${trade.instId}\n- Status: ${status}\n- Closed at: $${finalPrice}`, { parse_mode: 'Markdown' }); } } } }
 
 // =================================================================
-// SECTION 5: BOT UI AND COMMAND HANDLERS
+// SECTION 5: BOT UI AND COMMAND HANDLERS (COMPLETE VERSION)
 // =================================================================
 
 const mainKeyboard = new Keyboard()
     .text("📊 عرض المحفظة").text("📈 أداء المحفظة").row()
     .text("🚀 تحليل السوق").text("💡 توصية افتراضية").row()
-    .text("ℹ️ معلومات عملة").text("🔔 ضبط تنبيه").row()
-    .text("🧮 حاسبة الربح والخسارة").row()
+    .text("⚡ إحصائيات سريعة").text("ℹ️ معلومات عملة").row()
+    .text("🔔 ضبط تنبيه").text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").row()
     .resized();
+
+async function buildSettingsMenu() {
+    const settings = await loadSettings();
+    return new InlineKeyboard()
+        .text("💰 تعيين رأس المال", "set_capital")
+        .text("💼 عرض المراكز المفتوحة", "view_open_positions").row()
+        .text("🗑️ حذف تنبيه سعر", "manage_alerts")
+        .text("📊 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
+        .text(`✅ الملخص اليومي: ${settings.dailySummary ? 'ON' : 'OFF'}`, "toggle_summary")
+        .text(`🚀 النشر للقناة: ${settings.autoPostToChannel ? 'ON' : 'OFF'}`, "toggle_autopost").row()
+        .text(`🐞 وضع التشخيص: ${settings.debugMode ? 'ON' : 'OFF'}`, "toggle_debug")
+        .text("🔥 حذف جميع البيانات", "delete_all_data").row()
+        .text("🔙 إغلاق", "close_menu");
+}
 
 bot.use(async (ctx, next) => {
     if (String(ctx.from?.id) === String(AUTHORIZED_USER_ID)) {
@@ -137,7 +150,7 @@ bot.use(async (ctx, next) => {
                         break;
                     case 'alert':
                          const parts = text.split(' ');
-                         if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL > PRICE`");
+                         if (parts.length !== 3) return await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL > PRICE`", {parse_mode: "Markdown"});
                          const [symbol, condition, price] = parts;
                          if (!['<', '>'].includes(condition) || isNaN(parseFloat(price))) {
                              return await ctx.reply("❌ صيغة غير صحيحة. استخدم `>` للصعود أو `<` للهبوط وسعر صحيح.");
@@ -184,14 +197,10 @@ bot.hears("📊 عرض المحفظة", async (ctx) => {
     const loadingMsg = await ctx.reply("⏳ جاري إعداد التقرير...");
     try {
         const prices = await getMarketPrices();
-        if (!prices) {
-            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق.");
-        }
+        if (!prices) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق."); }
         const capital = await loadCapital();
         const portfolio = await getPortfolio(prices);
-        if (portfolio.error) {
-            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`);
-        }
+        if (portfolio.error) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`); }
         const msg = await formatPortfolioMsg(portfolio.assets, portfolio.total, capital);
         await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
     } catch(e) {
@@ -200,130 +209,12 @@ bot.hears("📊 عرض المحفظة", async (ctx) => {
     }
 });
 
-bot.hears("⚙️ الإعدادات", async (ctx) => {
-    try {
-        const settings = await loadSettings();
-        const settingsMenu = new InlineKeyboard()
-            .text(`النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").row()
-            .text(`الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
-            .text("💰 تعيين رأس المال", "set_capital")
-            .text("📊 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-            .text(`وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug")
-            .text("🔥 حذف جميع البيانات", "delete_all_data").row()
-            .text("🔙 إغلاق", "close_menu");
-
-        await ctx.reply("⚙️ *لوحة التحكم والإعدادات الرئيسية*", {
-            parse_mode: "Markdown",
-            reply_markup: settingsMenu
-        });
-    } catch (e) {
-        console.error("Error in 'الإعدادات' handler:", e);
-        await ctx.reply("حدث خطأ في عرض الإعدادات.");
-    }
-});
-
-bot.on("callback_query:data", async (ctx) => {
-    const query = ctx.callbackQuery.data;
-    await ctx.answerCallbackQuery();
-    let settings = await loadSettings();
-
-    try {
-        switch (query) {
-            case 'toggle_autopost':
-                settings.autoPostToChannel = !settings.autoPostToChannel;
-                break;
-            case 'toggle_summary':
-                settings.dailySummary = !settings.dailySummary;
-                break;
-            case 'toggle_debug':
-                settings.debugMode = !settings.debugMode;
-                break;
-            case 'set_capital':
-                waitingState = 'capital';
-                await ctx.reply("الرجاء إرسال مبلغ رأس المال الجديد.");
-                await ctx.deleteMessage();
-                return;
-            case 'close_menu':
-                await ctx.deleteMessage();
-                return;
-            case 'delete_all_data':
-                 await Promise.all([
-                    saveConfig("capital", { value: 0 }),
-                    saveConfig("positions", {}),
-                    saveConfig("dailyHistory", []),
-                    saveConfig("hourlyHistory", []),
-                    saveConfig("priceAlerts", [])
-                 ]);
-                 await ctx.reply("✅ تم حذف جميع بيانات التداول والتاريخ المحفوظة.");
-                 await ctx.deleteMessage();
-                 return;
-            case 'publish_report':
-                const originalMessage = ctx.callbackQuery.message.text;
-                const reportMarker = '<REPORT>';
-                const reportEndMarker = '</REPORT>';
-                const startIndex = originalMessage.indexOf(reportMarker);
-                if(startIndex !== -1){
-                    const reportJson = originalMessage.substring(startIndex + reportMarker.length, originalMessage.indexOf(reportEndMarker));
-                    try {
-                        const publicMessage = JSON.parse(reportJson);
-                        await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicMessage, { parse_mode: "Markdown" });
-                        await ctx.editMessageText(originalMessage.split(reportMarker)[0] + "\n\n*✅ تم النشر بنجاح.*", {parse_mode: "Markdown", reply_markup: undefined});
-                    } catch (e) { console.error("Failed to publish report:", e); }
-                }
-                return;
-            case 'ignore_report':
-                const originalMsg = ctx.callbackQuery.message.text;
-                const marker = '<REPORT>';
-                await ctx.editMessageText(originalMsg.split(marker)[0] + "\n\n*👍 تم التجاهل.*", {parse_mode: "Markdown", reply_markup: undefined});
-                return;
-            
-        }
-    
-        await saveSettings(settings);
-    
-        const updatedMenu = new InlineKeyboard()
-            .text(`النشر التلقائي للقناة: ${settings.autoPostToChannel ? '✅' : '❌'}`, "toggle_autopost").row()
-            .text(`الملخص اليومي: ${settings.dailySummary ? '✅' : '❌'}`, "toggle_summary").row()
-            .text("💰 تعيين رأس المال", "set_capital")
-            .text("📊 إدارة تنبيهات الحركة", "manage_movement_alerts").row()
-            .text(`وضع التشخيص: ${settings.debugMode ? '✅' : '❌'}`, "toggle_debug")
-            .text("🔥 حذف جميع البيانات", "delete_all_data").row()
-            .text("🔙 إغلاق", "close_menu");
-    
-        await ctx.editMessageReplyMarkup({ reply_markup: updatedMenu });
-
-    } catch (e) {
-        console.error("Error in callback_query handler:", e);
-    }
-});
-
-bot.hears("🚀 تحليل السوق", async (ctx) => {
-    try {
-        const msg = await formatAdvancedMarketAnalysis();
-        await ctx.reply(msg, {parse_mode: "Markdown"});
-    } catch (e) {
-        console.error("Error in 'تحليل السوق' handler:", e);
-        await ctx.reply("حدث خطأ في تحليل السوق.");
-    }
-});
-
-bot.hears("🔔 ضبط تنبيه", (ctx) => {
-    waitingState = 'alert';
-    ctx.reply("✍️ لإضافة تنبيه، أرسل رسالة بالصيغة التالية:\n`BTC > 70000`\nأو\n`ETH < 3500`", {parse_mode: "Markdown"});
-});
-
-bot.hears("ℹ️ معلومات عملة", (ctx) => {
-    waitingState = 'instrument_info';
-    ctx.reply("يرجى إرسال رمز العملة (مثال: BTC)");
-});
-
 bot.hears("📈 أداء المحفظة", async (ctx) => {
     try {
         await ctx.reply("📊 جاري حساب أداء المحفظة...");
         const history = await loadHistory();
         const stats = calculatePerformanceStats(history);
         if (!stats) return ctx.reply("لا توجد بيانات كافية.");
-
         const chartUrl = createChartUrl(history, 'Last 30 Days', stats.pnl);
         const pnlSign = stats.pnl >= 0 ? '+' : '';
         let msg = `*--- تقرير الأداء ---*\n`;
@@ -331,49 +222,175 @@ bot.hears("📈 أداء المحفظة", async (ctx) => {
         msg += `القيمة النهائية: \`$${formatNumber(stats.endValue)}\`\n`;
         msg += `صافي الربح/الخسارة: \`${pnlSign}$${formatNumber(stats.pnl)}\`\n`;
         msg += `نسبة التغيير: \`${pnlSign}${formatNumber(stats.pnlPercent)}%\``;
+        if (chartUrl) { await ctx.replyWithPhoto(chartUrl, { caption: msg, parse_mode: "Markdown" }); } 
+        else { await ctx.reply(msg, { parse_mode: "Markdown" }); }
+    } catch (e) { console.error("Error in 'أداء المحفظة' handler:", e); await ctx.reply("حدث خطأ في عرض الأداء."); }
+});
 
-        if (chartUrl) {
-            await ctx.replyWithPhoto(chartUrl, { caption: msg, parse_mode: "Markdown" });
-        } else {
+bot.hears("🚀 تحليل السوق", async (ctx) => {
+    try { const msg = await formatAdvancedMarketAnalysis(); await ctx.reply(msg, {parse_mode: "Markdown"}); } 
+    catch (e) { console.error("Error in 'تحليل السوق' handler:", e); await ctx.reply("حدث خطأ في تحليل السوق."); }
+});
+
+bot.hears("💡 توصية افتراضية", async (ctx) => {
+    try {
+        const tradeData = { instId: "BTC-USDT", entryPrice: 60000, stopLoss: 58000, takeProfit: 65000, status: 'active', createdAt: new Date() };
+        const savedTrade = await saveVirtualTrade(tradeData);
+        if (savedTrade) { await ctx.reply(`✅ تم إنشاء توصية افتراضية لـ BTC بنجاح. رقم المعرف: \`${savedTrade._id}\``, { parse_mode: "Markdown" }); } 
+        else { await ctx.reply("❌ فشل إنشاء التوصية الافتراضية."); }
+    } catch(e) { console.error("Error in 'توصية افتراضية' handler:", e); await ctx.reply("حدث خطأ."); }
+});
+
+bot.hears("⚡ إحصائيات سريعة", async (ctx) => {
+    try {
+        const loadingMsg = await ctx.reply("⏳ جاري جلب الإحصائيات السريعة...");
+        const prices = await getMarketPrices();
+        if (!prices) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق."); }
+        const capital = await loadCapital();
+        const portfolio = await getPortfolio(prices);
+        if (portfolio.error) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`); }
+        const msg = await formatQuickStats(portfolio.assets, portfolio.total, capital);
+        await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
+    } catch(e) { console.error("Error in 'إحصائيات سريعة' handler:", e); await ctx.reply("❌ حدث خطأ."); }
+});
+
+bot.hears("ℹ️ معلومات عملة", (ctx) => {
+    waitingState = 'instrument_info';
+    ctx.reply("يرجى إرسال رمز العملة (مثال: BTC)");
+});
+
+bot.hears("🔔 ضبط تنبيه", (ctx) => {
+    waitingState = 'alert';
+    ctx.reply("✍️ لإضافة تنبيه، أرسل رسالة بالصيغة التالية:\n`BTC > 70000`\nأو\n`ETH < 3500`", {parse_mode: "Markdown"});
+});
+
+bot.hears("🧮 حاسبة الربح والخسارة", (ctx) => {
+    ctx.reply("ميزة حاسبة الربح والخسارة قيد التطوير في هذه النسخة.");
+});
+
+bot.hears("⚙️ الإعدادات", async (ctx) => {
+    try {
+        const menu = await buildSettingsMenu();
+        await ctx.reply("⚙️ *لوحة التحكم والإعدادات الرئيسية*", {
+            parse_mode: "Markdown",
+            reply_markup: menu
+        });
+    } catch (e) { console.error("Error in 'الإعدادات' handler:", e); await ctx.reply("حدث خطأ في عرض الإعدادات."); }
+});
+
+
+bot.on("callback_query:data", async (ctx) => {
+    const query = ctx.callbackQuery.data;
+    await ctx.answerCallbackQuery();
+    
+    try {
+        if (query.startsWith('toggle_')) {
+            const settings = await loadSettings();
+            const key = query.split('_')[1];
+            if (key === 'autopost') settings.autoPostToChannel = !settings.autoPostToChannel;
+            if (key === 'summary') settings.dailySummary = !settings.dailySummary;
+            if (key === 'debug') settings.debugMode = !settings.debugMode;
+            await saveSettings(settings);
+            const menu = await buildSettingsMenu();
+            await ctx.editMessageReplyMarkup({ reply_markup: menu });
+        } else if (query === 'set_capital') {
+            waitingState = 'capital';
+            await ctx.deleteMessage();
+            await ctx.reply("الرجاء إرسال مبلغ رأس المال الجديد.");
+        } else if (query === 'close_menu') {
+            await ctx.deleteMessage();
+        } else if (query === 'view_open_positions') {
+            await ctx.deleteMessage();
+            const positions = await loadPositions();
+            if (Object.keys(positions).length === 0) return await ctx.reply("✅ لا توجد مراكز مفتوحة حاليًا.");
+            const prices = await getMarketPrices();
+            if (!prices) return await ctx.reply("❌ فشل جلب أسعار السوق.");
+            let msg = "💼 *المراكز المفتوحة حاليًا:*\n━━━━━━━━━━━━━━━━━━\n";
+            for (const asset in positions) {
+                const pos = positions[asset];
+                const currentPrice = prices[`${asset}-USDT`]?.price || 0;
+                const pnl = (currentPrice * pos.totalAmountBought) - pos.totalCost;
+                const pnlPercent = pos.totalCost > 0 ? (pnl / pos.totalCost) * 100 : 0;
+                msg += `*🪙 ${asset}*\n`;
+                msg += `  ▪️ *متوسط الشراء:* \`$${formatNumber(pos.avgBuyPrice, 4)}\`\n`;
+                msg += `  ▪️ *السعر الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n`;
+                msg += `  ▪️ *الربح/الخسارة:* \`${pnl >= 0 ? '+' : ''}${formatNumber(pnl)}\` (\`${pnl >= 0 ? '+' : ''}${formatNumber(pnlPercent)}%\`) ${pnl >= 0 ? '🟢' : '🔴'}\n`;
+                msg += `─────────────────\n`;
+            }
             await ctx.reply(msg, { parse_mode: "Markdown" });
+        } else if (query === 'manage_alerts') {
+            const alerts = await loadAlerts();
+            if (alerts.length === 0) {
+                await ctx.answerCallbackQuery({ text: 'لا توجد تنبيهات لحذفها.', show_alert: true });
+                return;
+            }
+            const alertKeyboard = new InlineKeyboard();
+            alerts.forEach((alert, index) => {
+                alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
+            });
+            alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
+            await ctx.editMessageText("اختر التنبيه الذي تود حذفه:", { reply_markup: alertKeyboard });
+        } else if (query.startsWith('delete_alert:')) {
+            const indexToDelete = parseInt(query.split(':')[1]);
+            const currentAlerts = await loadAlerts();
+            const deletedAlert = currentAlerts.splice(indexToDelete, 1)[0];
+            await saveAlerts(currentAlerts);
+            await ctx.answerCallbackQuery({ text: `✅ تم حذف تنبيه ${deletedAlert.instId}.` });
+            if (currentAlerts.length === 0) {
+                await ctx.editMessageText("✅ تم حذف جميع التنبيهات.", { reply_markup: new InlineKeyboard().text("🔙 رجوع للإعدادات", "back_to_settings") });
+            } else {
+                 const alertKeyboard = new InlineKeyboard();
+                 currentAlerts.forEach((alert, index) => {
+                    alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
+                 });
+                 alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
+                 await ctx.editMessageText("اختر تنبيهًا آخر لحذفه:", { reply_markup: alertKeyboard });
+            }
+        } else if (query === 'back_to_settings') {
+            const menu = await buildSettingsMenu();
+            await ctx.editMessageText("⚙️ *لوحة التحكم والإعدادات الرئيسية*", { parse_mode: "Markdown", reply_markup: menu });
+        } else if (query === 'delete_all_data') {
+             await getDB().flushdb(); // Deletes all keys from the current database.
+             await ctx.reply("🔥 تم حذف جميع بيانات التداول والتاريخ والإعدادات المحفوظة.");
+             await ctx.deleteMessage();
+        } else if (query.includes('report')) {
+            // Handle publish/ignore report from monitorBalanceChanges
+            const originalMessage = ctx.callbackQuery.message.text;
+            const reportMarker = '<REPORT>';
+            const cleanMessage = originalMessage.split(reportMarker)[0];
+            if (query === 'publish_report') {
+                const reportJson = originalMessage.substring(originalMessage.indexOf(reportMarker) + reportMarker.length, originalMessage.indexOf('</REPORT>'));
+                const publicMessage = JSON.parse(reportJson);
+                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicMessage, { parse_mode: "Markdown" });
+                await ctx.editMessageText(cleanMessage + "\n\n*✅ تم النشر بنجاح.*", { parse_mode: "Markdown", reply_markup: undefined });
+            } else { // ignore_report
+                await ctx.editMessageText(cleanMessage + "\n\n*👍 تم التجاهل.*", { parse_mode: "Markdown", reply_markup: undefined });
+            }
         }
-    } catch (e) {
-        console.error("Error in 'أداء المحفظة' handler:", e);
-        await ctx.reply("حدث خطأ في عرض الأداء.");
-    }
+    } catch (e) { console.error("Error in callback_query handler:", e); }
 });
 
 
 // =================================================================
-// SECTION 6: VERCEL SERVER HANDLER (The Correct Way)
+// SECTION 6: VERCEL SERVER HANDLER
 // =================================================================
 const app = express();
 app.use(express.json());
 
-// Initialize DB connection once.
-connectDB();
+connectDB(); // Initialize DB connection
 
-// The official, recommended way to handle webhooks with express
 const webhookHandler = webhookCallback(bot, "express");
-
 app.post("/api/bot", webhookHandler);
 
 app.get("/api/cron", async (req, res) => {
-    // Secure the cron endpoint
     if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
         return res.status(401).send('Unauthorized');
     }
     try {
         console.log("Cron job triggered...");
-        // Run all background jobs
         await Promise.all([
-            monitorBalanceChanges(),
-            trackPositionHighLow(),
-            checkPriceAlerts(),
-            checkPriceMovements(),
-            monitorVirtualTrades(),
-            runHourlyJobs(),
-            runDailyJobs()
+            monitorBalanceChanges(), trackPositionHighLow(), checkPriceAlerts(),
+            checkPriceMovements(), monitorVirtualTrades(), runHourlyJobs(), runDailyJobs()
         ]);
         console.log("Cron jobs finished successfully.");
         res.status(200).send("Cron jobs executed successfully.");
@@ -384,16 +401,12 @@ app.get("/api/cron", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.status(200).send("OKX Advanced Analytics Bot v119 is alive.");
+    res.status(200).send("OKX Advanced Analytics Bot v120 is alive.");
 });
 
-// General error handler for express
 app.use((err, req, res, next) => {
     console.error("--- EXPRESS SERVER ERROR ---", err);
-    if (!res.headersSent) {
-        res.status(500).send("An unexpected server error occurred.");
-    }
+    if (!res.headersSent) { res.status(500).send("An unexpected server error occurred."); }
 });
 
-// Export the app for Vercel's serverless environment
 module.exports = app;
