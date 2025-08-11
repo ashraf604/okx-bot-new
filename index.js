@@ -1,5 +1,5 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v120 (The Final & Complete Conscience Fix)
+// OKX Advanced Analytics Bot - v122 (Complete v120 + Full Virtual Trades)
 // =================================================================
 
 const express = require("express");
@@ -15,7 +15,7 @@ const API_BASE_URL = "https://www.okx.com";
 
 // --- State Variables ---
 let waitingState = null;
-let statePayload = null; // To hold extra data for waiting states
+let statePayload = null;
 
 // =================================================================
 // SECTION 1: DATABASE (VERCEL KV) AND HELPER FUNCTIONS
@@ -73,18 +73,16 @@ function getHeaders(method, path, body = "") { const timestamp = new Date().toIS
 
 // =================================================================
 // SECTION 2, 3, 4: ALL DATA, FORMATTING, AND BACKGROUND FUNCTIONS
-// This section is complete and contains all original functions.
 // =================================================================
-// ... Includes getMarketPrices, getPortfolio, all format functions, all monitor functions, etc.
 async function getMarketPrices() { try { const tickersRes = await fetch(`${API_BASE_URL}/api/v5/market/tickers?instType=SPOT`); const tickersJson = await tickersRes.json(); if (tickersJson.code !== '0') { console.error("Failed to fetch market prices (OKX Error):", tickersJson.msg); return null; } const prices = {}; tickersJson.data.forEach(t => { if (t.instId.endsWith('-USDT')) { const lastPrice = parseFloat(t.last); const openPrice = parseFloat(t.open24h); let change24h = 0; if (openPrice > 0) change24h = (lastPrice - openPrice) / openPrice; prices[t.instId] = { price: lastPrice, open24h: openPrice, change24h, volCcy24h: parseFloat(t.volCcy24h) }; } }); return prices; } catch (error) { console.error("Exception in getMarketPrices:", error.message); return null; } }
-async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) { return { error: `فشل جلب المحفظة: ${json.msg || 'بيانات غير متوقعة من المنصة'}` }; } let assets = [], total = 0, usdtValue = 0; json.data[0].details.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const value = amount * priceData.price; total += value; if (asset.ccy === "USDT") { usdtValue = value; } if (value >= 1) { assets.push({ asset: asset.ccy, price: priceData.price, value, amount, change24h: priceData.change24h }); } } }); assets.sort((a, b) => b.value - a.value); return { assets, total, usdtValue }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
-async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data[0] || !json.data[0].details) return null; const balanceMap = {}; json.data[0].details.forEach(asset => { balanceMap[asset.ccy] = parseFloat(asset.eq); }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
-async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data[0]) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data[0]; return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
-async function getHistoricalCandles(instId, limit = 100) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId}&bar=1D&limit=${limit}`); const json = await res.json(); if (json.code !== '0' || !json.data || json.data.length === 0) return []; return json.data.map(c => parseFloat(c[4])).reverse(); } catch (e) { console.error(`Exception in getHistoricalCandles for ${instId}:`, e); return []; } }
+async function getPortfolio(prices) { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data || !json.data.details) { return { error: `فشل جلب المحفظة: ${json.msg || 'بيانات غير متوقعة من المنصة'}` }; } let assets = [], total = 0, usdtValue = 0; json.data.details.forEach(asset => { const amount = parseFloat(asset.eq); if (amount > 0) { const instId = `${asset.ccy}-USDT`; const priceData = prices[instId] || { price: (asset.ccy === "USDT" ? 1 : 0), change24h: 0 }; const value = amount * priceData.price; total += value; if (asset.ccy === "USDT") { usdtValue = value; } if (value >= 1) { assets.push({ asset: asset.ccy, price: priceData.price, value, amount, change24h: priceData.change24h }); } } }); assets.sort((a, b) => b.value - a.value); return { assets, total, usdtValue }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getBalanceForComparison() { try { const path = "/api/v5/account/balance"; const res = await fetch(`${API_BASE_URL}${path}`, { headers: getHeaders("GET", path) }); const json = await res.json(); if (json.code !== '0' || !json.data || !json.data || !json.data.details) return null; const balanceMap = {}; json.data.details.forEach(asset => { balanceMap[asset.ccy] = parseFloat(asset.eq); }); return balanceMap; } catch (error) { console.error("Exception in getBalanceForComparison:", error); return null; } }
+async function getInstrumentDetails(instId) { try { const tickerRes = await fetch(`${API_BASE_URL}/api/v5/market/ticker?instId=${instId.toUpperCase()}`); const tickerJson = await tickerRes.json(); if (tickerJson.code !== '0' || !tickerJson.data) return { error: `لم يتم العثور على العملة.` }; const tickerData = tickerJson.data; return { price: parseFloat(tickerData.last), high24h: parseFloat(tickerData.high24h), low24h: parseFloat(tickerData.low24h), vol24h: parseFloat(tickerData.volCcy24h), }; } catch (e) { console.error(e); return { error: "خطأ في الاتصال بالمنصة." }; } }
+async function getHistoricalCandles(instId, limit = 100) { try { const res = await fetch(`${API_BASE_URL}/api/v5/market/history-candles?instId=${instId}&bar=1D&limit=${limit}`); const json = await res.json(); if (json.code !== '0' || !json.data || json.data.length === 0) return []; return json.data.map(c => parseFloat(c)).reverse(); } catch (e) { console.error(`Exception in getHistoricalCandles for ${instId}:`, e); return []; } }
 function calculateSMA(closes, period) { if (closes.length < period) return null; const sum = closes.slice(-period).reduce((acc, val) => acc + val, 0); return sum / period; }
 function calculateRSI(closes, period = 14) { if (closes.length < period + 1) return null; let gains = 0, losses = 0; for (let i = 1; i <= period; i++) { const diff = closes[i] - closes[i - 1]; diff > 0 ? gains += diff : losses -= diff; } let avgGain = gains / period, avgLoss = losses / period; for (let i = period + 1; i < closes.length; i++) { const diff = closes[i] - closes[i - 1]; if (diff > 0) { avgGain = (avgGain * (period - 1) + diff) / period; avgLoss = (avgLoss * (period - 1)) / period; } else { avgLoss = (avgLoss * (period - 1) - diff) / period; avgGain = (avgGain * (period - 1)) / period; } } if (avgLoss === 0) return 100; const rs = avgGain / avgLoss; return 100 - (100 / (1 + rs)); }
 async function getTechnicalAnalysis(instId) { const closes = await getHistoricalCandles(instId, 51); if (closes.length < 51) return { error: "بيانات الشموع غير كافية." }; return { rsi: calculateRSI(closes), sma20: calculateSMA(closes, 20), sma50: calculateSMA(closes, 50) }; }
-function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values[0]; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
+function calculatePerformanceStats(history) { if (history.length < 2) return null; const values = history.map(h => h.total); const startValue = values; const endValue = values[values.length - 1]; const pnl = endValue - startValue; const pnlPercent = (startValue > 0) ? (pnl / startValue) * 100 : 0; const maxValue = Math.max(...values); const minValue = Math.min(...values); const avgValue = values.reduce((sum, val) => sum + val, 0) / values.length; return { startValue, endValue, pnl, pnlPercent, maxValue, minValue, avgValue }; }
 function createChartUrl(history, periodLabel, pnl) { if (history.length < 2) return null; const chartColor = pnl >= 0 ? 'rgb(75, 192, 75)' : 'rgb(255, 99, 132)'; const chartBgColor = pnl >= 0 ? 'rgba(75, 192, 75, 0.2)' : 'rgba(255, 99, 132, 0.2)'; const labels = history.map(h => h.label); const data = history.map(h => h.total.toFixed(2)); const chartConfig = { type: 'line', data: { labels: labels, datasets: [{ label: 'قيمة المحفظة ($)', data: data, fill: true, backgroundColor: chartBgColor, borderColor: chartColor, tension: 0.1 }] }, options: { title: { display: true, text: `أداء المحفظة - ${periodLabel}` } } }; return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&backgroundColor=white`; }
 function formatPrivateBuy(details) { const { asset, price, amountChange, tradeValue, oldTotalValue, newAssetWeight, newUsdtValue, newCashPercent } = details; const tradeSizePercent = oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0; let msg = `*مراقبة الأصول 🔬:*\n**عملية استحواذ جديدة 🟢**\n━━━━━━━━━━━━━━━━━━━━\n`; msg += `🔸 **الأصل المستهدف:** \`${asset}/USDT\`\n`; msg += `🔸 **نوع العملية:** تعزيز مركز / بناء مركز جديد\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*تحليل الصفقة:*\n`; msg += ` ▪️ **سعر التنفيذ:** \`$${formatNumber(price, 4)}\`\n`; msg += ` ▪️ **الكمية المضافة:** \`${formatNumber(Math.abs(amountChange), 6)}\`\n`; msg += ` ▪️ **التكلفة الإجمالية للصفقة:** \`$${formatNumber(tradeValue)}\`\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*التأثير على هيكل المحفظة:*\n`; msg += ` ▪️ **حجم الصفقة من إجمالي المحفظة:** \`${formatNumber(tradeSizePercent)}%\`\n`; msg += ` ▪️ **الوزن الجديد للأصل:** \`${formatNumber(newAssetWeight)}%\`\n`; msg += ` ▪️ **السيولة المتبقية (USDT):** \`$${formatNumber(newUsdtValue)}\`\n`; msg += ` ▪️ **مؤشر السيولة الحالي:** \`${formatNumber(newCashPercent)}%\`\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*بتاريخ:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`; return msg; }
 function formatPrivateSell(details) { const { asset, price, amountChange, tradeValue, oldTotalValue, newAssetWeight, newUsdtValue, newCashPercent } = details; const tradeSizePercent = oldTotalValue > 0 ? (tradeValue / oldTotalValue) * 100 : 0; let msg = `*مراقبة الأصول 🔬:*\n**مناورة تكتيكية 🟠**\n━━━━━━━━━━━━━━━━━━━━\n`; msg += `🔸 **الأصل المستهدف:** \`${asset}/USDT\`\n`; msg += `🔸 **نوع العملية:** تخفيف المركز / جني أرباح جزئي\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*تحليل الصفقة:*\n`; msg += ` ▪️ **سعر التنفيذ:** \`$${formatNumber(price, 4)}\`\n`; msg += ` ▪️ **الكمية المخففة:** \`${formatNumber(Math.abs(amountChange), 6)}\`\n`; msg += ` ▪️ **العائد الإجمالي للصفقة:** \`$${formatNumber(tradeValue)}\`\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*التأثير على هيكل المحفظة:*\n`; msg += ` ▪️ **حجم الصفقة من إجمالي المحفظة:** \`${formatNumber(tradeSizePercent)}%\`\n`; msg += ` ▪️ **الوزن الجديد للأصل:** \`${formatNumber(newAssetWeight)}%\`\n`; msg += ` ▪️ **السيولة الجديدة (USDT):** \`$${formatNumber(newUsdtValue)}\`\n`; msg += ` ▪️ **مؤشر السيولة الحالي:** \`${formatNumber(newCashPercent)}%\`\n`; msg += `━━━━━━━━━━━━━━━━━━━━\n*بتاريخ:* ${new Date().toLocaleString("ar-EG", { timeZone: "Africa/Cairo" })}`; return msg; }
@@ -102,7 +100,7 @@ async function checkPriceAlerts() { try { const alerts = await loadAlerts(); if 
 async function checkPriceMovements() { try { await sendDebugMessage("Checking price movements..."); const alertSettings = await loadAlertSettings(); const priceTracker = await loadPriceTracker(); const prices = await getMarketPrices(); if (!prices) return; const { assets, total: currentTotalValue, error } = await getPortfolio(prices); if (error || currentTotalValue === undefined) return; if (priceTracker.totalPortfolioValue === 0) { priceTracker.totalPortfolioValue = currentTotalValue; assets.forEach(a => { if (a.price) priceTracker.assets[a.asset] = a.price; }); await savePriceTracker(priceTracker); return; } let trackerUpdated = false; for (const asset of assets) { if (asset.asset === 'USDT' || !asset.price) continue; const lastPrice = priceTracker.assets[asset.asset]; if (lastPrice) { const changePercent = ((asset.price - lastPrice) / lastPrice) * 100; const threshold = alertSettings.overrides[asset.asset] || alertSettings.global; if (Math.abs(changePercent) >= threshold) { const movementText = changePercent > 0 ? 'صعود' : 'هبوط'; const message = `📈 *تنبيه حركة سعر لأصل!* \`${asset.asset}\`\n*الحركة:* ${movementText} بنسبة \`${formatNumber(changePercent)}%\`\n*السعر الحالي:* \`$${formatNumber(asset.price, 4)}\``; await bot.api.sendMessage(AUTHORIZED_USER_ID, message, { parse_mode: "Markdown" }); priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } else { priceTracker.assets[asset.asset] = asset.price; trackerUpdated = true; } } if (trackerUpdated) await savePriceTracker(priceTracker); } catch (e) { console.error("CRITICAL ERROR in checkPriceMovements:", e); } }
 async function runDailyJobs() { try { const settings = await loadSettings(); if (!settings.dailySummary) return; const prices = await getMarketPrices(); if (!prices) return; const { total } = await getPortfolio(prices); if (total === undefined) return; const history = await loadHistory(); const date = new Date().toISOString().slice(0, 10); const todayIndex = history.findIndex(h => h.date === date); if (todayIndex > -1) history[todayIndex].total = total; else history.push({ date, total }); if (history.length > 35) history.shift(); await saveHistory(history); console.log(`[Daily Summary Recorded]: ${date} - $${formatNumber(total)}`); } catch (e) { console.error("CRITICAL ERROR in runDailyJobs:", e); } }
 async function runHourlyJobs() { try { const prices = await getMarketPrices(); if (!prices) return; const { total } = await getPortfolio(prices); if (total === undefined) return; const history = await loadHourlyHistory(); const hourLabel = new Date().toISOString().slice(0, 13); const existingIndex = history.findIndex(h => h.label === hourLabel); if (existingIndex > -1) history[existingIndex].total = total; else history.push({ label: hourLabel, total }); if (history.length > 72) history.splice(0, history.length - 72); await saveHourlyHistory(history); } catch (e) { console.error("Error in hourly jobs:", e); } }
-async function monitorVirtualTrades() { const activeTrades = await getActiveVirtualTrades(); if (!activeTrades || activeTrades.length === 0) return; const prices = await getMarketPrices(); if (!prices) { console.error("Could not fetch prices for monitoring virtual trades."); return; } for (const trade of activeTrades) { const priceData = prices[trade.instId]; if (priceData && priceData.price) { const currentPrice = priceData.price; let status = 'active'; let finalPrice = null; if (trade.stopLoss && currentPrice <= trade.stopLoss) { status = 'closed_sl'; finalPrice = trade.stopLoss; } else if (trade.takeProfit && currentPrice >= trade.takeProfit) { status = 'closed_tp'; finalPrice = trade.takeProfit; } if (status !== 'active') { await updateVirtualTradeStatus(trade._id, status, finalPrice); await bot.api.sendMessage(AUTHORIZED_USER_ID, `🔔 *Virtual Trade Update:*\n- Asset: ${trade.instId}\n- Status: ${status}\n- Closed at: $${finalPrice}`, { parse_mode: 'Markdown' }); } } } }
+async function monitorVirtualTrades() { const activeTrades = await getActiveVirtualTrades(); if (!activeTrades || activeTrades.length === 0) return; const prices = await getMarketPrices(); if (!prices) { console.error("Could not fetch prices for monitoring virtual trades."); return; } for (const trade of activeTrades) { const priceData = prices[trade.instId]; if (priceData && priceData.price) { const currentPrice = priceData.price; let status = 'active'; let finalPrice = null; if (trade.stopLossPrice && currentPrice <= trade.stopLossPrice) { status = 'closed_sl'; finalPrice = trade.stopLossPrice; } else if (trade.targetPrice && currentPrice >= trade.targetPrice) { status = 'closed_tp'; finalPrice = trade.targetPrice; } if (status !== 'active') { await updateVirtualTradeStatus(trade._id, status, finalPrice); await bot.api.sendMessage(AUTHORIZED_USER_ID, `🔔 *Virtual Trade Update:*\n- Asset: ${trade.instId}\n- Status: ${status}\n- Closed at: $${finalPrice}`, { parse_mode: 'Markdown' }); } } } }
 
 // =================================================================
 // SECTION 5: BOT UI AND COMMAND HANDLERS (COMPLETE VERSION)
@@ -115,6 +113,11 @@ const mainKeyboard = new Keyboard()
     .text("🔔 ضبط تنبيه").text("🧮 حاسبة الربح والخسارة").row()
     .text("⚙️ الإعدادات").row()
     .resized();
+
+const virtualTradeKeyboard = new InlineKeyboard()
+    .text("➕ إضافة توصية", "add_virtual_trade").row()
+    .text("📊 متابعة التوصيات", "track_virtual_trades").row()
+    .text("🔙 رجوع", "back_to_main");
 
 async function buildSettingsMenu() {
     const settings = await loadSettings();
@@ -175,6 +178,60 @@ bot.use(async (ctx, next) => {
                          }
                          await ctx.reply(infoMsg, { parse_mode: "Markdown" });
                          break;
+                    case 'pnl_calc_details':
+                        const pnlParts = text.split(' ').map(parseFloat);
+                        if (pnlParts.length !== 3 || pnlParts.some(isNaN)) return await ctx.reply("❌ صيغة غير صحيحة. أرسل 3 أرقام: `الدخول الخروج الكمية`", {parse_mode: "Markdown"});
+                        const [entry, exit, quantity] = pnlParts;
+                        const pnl = (exit - entry) * quantity;
+                        const roi = entry > 0 ? ((exit - entry) / entry) * 100 : 0;
+                        const pnlSign = pnl >= 0 ? '+' : '';
+                        let pnlMsg = `🧮 *نتيجة الحاسبة:*\n\n`;
+                        pnlMsg += `  ▪️ **صافي الربح/الخسارة:** \`${pnlSign}$${formatNumber(pnl)}\` ${pnl >= 0 ? '🟢' : '🔴'}\n`;
+                        pnlMsg += `  ▪️ **نسبة العائد (ROI):** \`${pnlSign}${formatNumber(roi)}%\``;
+                        await ctx.reply(pnlMsg, { parse_mode: "Markdown" });
+                        break;
+                    case 'movement_alert_global':
+                        const globalPercent = parseFloat(text);
+                        if (isNaN(globalPercent) || globalPercent <= 0) return await ctx.reply("❌ نسبة مئوية غير صالحة.");
+                        const alertSettings = await loadAlertSettings();
+                        alertSettings.global = globalPercent;
+                        await saveAlertSettings(alertSettings);
+                        await ctx.reply(`✅ تم تحديث التنبيه العام للحركة إلى: ${globalPercent}%`);
+                        break;
+                    case 'movement_alert_override':
+                        const overrideParts = text.split(' ');
+                        if (overrideParts.length !== 2) return await ctx.reply("❌ صيغة غير صحيحة. استخدم: `SYMBOL PERCENTAGE`", {parse_mode: "Markdown"});
+                        const [overrideSymbol, overridePercentText] = overrideParts;
+                        const overridePercent = parseFloat(overridePercentText);
+                        if (isNaN(overridePercent) || overridePercent <= 0) return await ctx.reply("❌ نسبة مئوية غير صالحة.");
+                        const currentAlertSettings = await loadAlertSettings();
+                        currentAlertSettings.overrides[overrideSymbol.toUpperCase()] = overridePercent;
+                        await saveAlertSettings(currentAlertSettings);
+                        await ctx.reply(`✅ تم تعيين تنبيه خاص لـ ${overrideSymbol.toUpperCase()} عند ${overridePercent}%.`);
+                        break;
+                    case 'add_virtual_trade':
+                        const lines = text.split('\n').map(l => l.trim());
+                        if (lines.length !== 5) return await ctx.reply("❌ يجب إرسال 5 أسطر بالترتيب المطلوب، حاول مجددًا.");
+                        const [instIdVT, entryStr, targetStr, stopStr, amountStr] = lines;
+                        const entryPriceVT = parseFloat(entryStr);
+                        const targetPrice = parseFloat(targetStr);
+                        const stopLossPrice = parseFloat(stopStr);
+                        const virtualAmount = parseFloat(amountStr);
+                        if ([entryPriceVT, targetPrice, stopLossPrice, virtualAmount].some(isNaN)) {
+                            return await ctx.reply("❌ أحد القيم المدخلة ليس رقمًا صالحًا.");
+                        }
+                        const tradeObj = {
+                            instId: instIdVT.toUpperCase(),
+                            entryPrice: entryPriceVT,
+                            targetPrice,
+                            stopLossPrice,
+                            virtualAmount,
+                            status: 'active',
+                            createdAt: new Date()
+                        };
+                        await saveVirtualTrade(tradeObj);
+                        await ctx.reply(`✅ تم حفظ التوصية الافتراضية لـ ${instIdVT.toUpperCase()} بنجاح.`, { reply_markup: virtualTradeKeyboard });
+                        break;
                 }
             } catch (e) {
                 console.error(`Error in waitingState handler ('${state}'):`, e);
@@ -197,75 +254,20 @@ bot.hears("📊 عرض المحفظة", async (ctx) => {
     const loadingMsg = await ctx.reply("⏳ جاري إعداد التقرير...");
     try {
         const prices = await getMarketPrices();
-        if (!prices) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق."); }
+        if (!prices) {
+            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق.");
+        }
         const capital = await loadCapital();
         const portfolio = await getPortfolio(prices);
-        if (portfolio.error) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`); }
+        if (portfolio.error) {
+            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`);
+        }
         const msg = await formatPortfolioMsg(portfolio.assets, portfolio.total, capital);
         await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
     } catch(e) {
          console.error("Error in 'عرض المحفظة' handler:", e);
          await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ حدث خطأ داخلي أثناء عرض المحفظة.");
     }
-});
-
-bot.hears("📈 أداء المحفظة", async (ctx) => {
-    try {
-        await ctx.reply("📊 جاري حساب أداء المحفظة...");
-        const history = await loadHistory();
-        const stats = calculatePerformanceStats(history);
-        if (!stats) return ctx.reply("لا توجد بيانات كافية.");
-        const chartUrl = createChartUrl(history, 'Last 30 Days', stats.pnl);
-        const pnlSign = stats.pnl >= 0 ? '+' : '';
-        let msg = `*--- تقرير الأداء ---*\n`;
-        msg += `قيمة البداية: \`$${formatNumber(stats.startValue)}\`\n`;
-        msg += `القيمة النهائية: \`$${formatNumber(stats.endValue)}\`\n`;
-        msg += `صافي الربح/الخسارة: \`${pnlSign}$${formatNumber(stats.pnl)}\`\n`;
-        msg += `نسبة التغيير: \`${pnlSign}${formatNumber(stats.pnlPercent)}%\``;
-        if (chartUrl) { await ctx.replyWithPhoto(chartUrl, { caption: msg, parse_mode: "Markdown" }); } 
-        else { await ctx.reply(msg, { parse_mode: "Markdown" }); }
-    } catch (e) { console.error("Error in 'أداء المحفظة' handler:", e); await ctx.reply("حدث خطأ في عرض الأداء."); }
-});
-
-bot.hears("🚀 تحليل السوق", async (ctx) => {
-    try { const msg = await formatAdvancedMarketAnalysis(); await ctx.reply(msg, {parse_mode: "Markdown"}); } 
-    catch (e) { console.error("Error in 'تحليل السوق' handler:", e); await ctx.reply("حدث خطأ في تحليل السوق."); }
-});
-
-bot.hears("💡 توصية افتراضية", async (ctx) => {
-    try {
-        const tradeData = { instId: "BTC-USDT", entryPrice: 60000, stopLoss: 58000, takeProfit: 65000, status: 'active', createdAt: new Date() };
-        const savedTrade = await saveVirtualTrade(tradeData);
-        if (savedTrade) { await ctx.reply(`✅ تم إنشاء توصية افتراضية لـ BTC بنجاح. رقم المعرف: \`${savedTrade._id}\``, { parse_mode: "Markdown" }); } 
-        else { await ctx.reply("❌ فشل إنشاء التوصية الافتراضية."); }
-    } catch(e) { console.error("Error in 'توصية افتراضية' handler:", e); await ctx.reply("حدث خطأ."); }
-});
-
-bot.hears("⚡ إحصائيات سريعة", async (ctx) => {
-    try {
-        const loadingMsg = await ctx.reply("⏳ جاري جلب الإحصائيات السريعة...");
-        const prices = await getMarketPrices();
-        if (!prices) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق."); }
-        const capital = await loadCapital();
-        const portfolio = await getPortfolio(prices);
-        if (portfolio.error) { return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`); }
-        const msg = await formatQuickStats(portfolio.assets, portfolio.total, capital);
-        await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
-    } catch(e) { console.error("Error in 'إحصائيات سريعة' handler:", e); await ctx.reply("❌ حدث خطأ."); }
-});
-
-bot.hears("ℹ️ معلومات عملة", (ctx) => {
-    waitingState = 'instrument_info';
-    ctx.reply("يرجى إرسال رمز العملة (مثال: BTC)");
-});
-
-bot.hears("🔔 ضبط تنبيه", (ctx) => {
-    waitingState = 'alert';
-    ctx.reply("✍️ لإضافة تنبيه، أرسل رسالة بالصيغة التالية:\n`BTC > 70000`\nأو\n`ETH < 3500`", {parse_mode: "Markdown"});
-});
-
-bot.hears("🧮 حاسبة الربح والخسارة", (ctx) => {
-    ctx.reply("ميزة حاسبة الربح والخسارة قيد التطوير في هذه النسخة.");
 });
 
 bot.hears("⚙️ الإعدادات", async (ctx) => {
@@ -275,101 +277,265 @@ bot.hears("⚙️ الإعدادات", async (ctx) => {
             parse_mode: "Markdown",
             reply_markup: menu
         });
-    } catch (e) { console.error("Error in 'الإعدادات' handler:", e); await ctx.reply("حدث خطأ في عرض الإعدادات."); }
+    } catch (e) {
+        console.error("Error in 'الإعدادات' handler:", e);
+        await ctx.reply("حدث خطأ في عرض الإعدادات.");
+    }
 });
 
+bot.hears("🚀 تحليل السوق", async (ctx) => {
+    try {
+        const msg = await formatAdvancedMarketAnalysis();
+        await ctx.reply(msg, {parse_mode: "Markdown"});
+    } catch (e) {
+        console.error("Error in 'تحليل السوق' handler:", e);
+        await ctx.reply("حدث خطأ في تحليل السوق.");
+    }
+});
+
+bot.hears("🔔 ضبط تنبيه", (ctx) => {
+    waitingState = 'alert';
+    ctx.reply("✍️ لإضافة تنبيه، أرسل رسالة بالصيغة التالية:\n`BTC > 70000`\nأو\n`ETH < 3500`", {parse_mode: "Markdown"});
+});
+
+bot.hears("ℹ️ معلومات عملة", (ctx) => {
+    waitingState = 'instrument_info';
+    ctx.reply("يرجى إرسال رمز العملة (مثال: BTC)");
+});
+
+bot.hears("📈 أداء المحفظة", async (ctx) => {
+    try {
+        await ctx.reply("📊 جاري حساب أداء المحفظة...");
+        const history = await loadHistory();
+        const stats = calculatePerformanceStats(history);
+        if (!stats) return ctx.reply("لا توجد بيانات كافية.");
+
+        const chartUrl = createChartUrl(history, 'Last 30 Days', stats.pnl);
+        const pnlSign = stats.pnl >= 0 ? '+' : '';
+        let msg = `*--- تقرير الأداء ---*\n`;
+        msg += `قيمة البداية: \`$${formatNumber(stats.startValue)}\`\n`;
+        msg += `القيمة النهائية: \`$${formatNumber(stats.endValue)}\`\n`;
+        msg += `صافي الربح/الخسارة: \`${pnlSign}$${formatNumber(stats.pnl)}\`\n`;
+        msg += `نسبة التغيير: \`${pnlSign}${formatNumber(stats.pnlPercent)}%\``;
+
+        if (chartUrl) {
+            await ctx.replyWithPhoto(chartUrl, { caption: msg, parse_mode: "Markdown" });
+        } else {
+            await ctx.reply(msg, { parse_mode: "Markdown" });
+        }
+    } catch (e) {
+        console.error("Error in 'أداء المحفظة' handler:", e);
+        await ctx.reply("حدث خطأ في عرض الأداء.");
+    }
+});
+
+bot.hears("💡 توصية افتراضية", async (ctx) => {
+    await ctx.reply("💡 *إدارة التوصيات الافتراضية* اختر الإجراء:", {
+        parse_mode: "Markdown",
+        reply_markup: virtualTradeKeyboard
+    });
+});
+
+bot.hears("⚡ إحصائيات سريعة", async (ctx) => {
+    try {
+        const loadingMsg = await ctx.reply("⏳ جاري جلب الإحصائيات السريعة...");
+        const prices = await getMarketPrices();
+        if (!prices) {
+            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, "❌ فشل جلب أسعار السوق.");
+        }
+        const capital = await loadCapital();
+        const portfolio = await getPortfolio(prices);
+        if (portfolio.error) {
+            return bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, `❌ ${portfolio.error}`);
+        }
+        const msg = await formatQuickStats(portfolio.assets, portfolio.total, capital);
+        await bot.api.editMessageText(loadingMsg.chat.id, loadingMsg.message_id, msg, { parse_mode: "Markdown" });
+    } catch(e) {
+        console.error("Error in 'إحصائيات سريعة' handler:", e);
+        await ctx.reply("❌ حدث خطأ.");
+    }
+});
+
+bot.hears("🧮 حاسبة الربح والخسارة", (ctx) => {
+    waitingState = 'pnl_calc_details';
+    ctx.reply("✍️ لحساب الربح/الخسارة، أرسل البيانات بالصيغة التالية:\n`سعر_الدخول سعر_الخروج الكمية`\n\nمثال:\n`60000 65000 0.5`", { parse_mode: "Markdown" });
+});
 
 bot.on("callback_query:data", async (ctx) => {
     const query = ctx.callbackQuery.data;
     await ctx.answerCallbackQuery();
     
     try {
-        if (query.startsWith('toggle_')) {
-            const settings = await loadSettings();
-            const key = query.split('_')[1];
-            if (key === 'autopost') settings.autoPostToChannel = !settings.autoPostToChannel;
-            if (key === 'summary') settings.dailySummary = !settings.dailySummary;
-            if (key === 'debug') settings.debugMode = !settings.debugMode;
-            await saveSettings(settings);
-            const menu = await buildSettingsMenu();
-            await ctx.editMessageReplyMarkup({ reply_markup: menu });
-        } else if (query === 'set_capital') {
-            waitingState = 'capital';
-            await ctx.deleteMessage();
-            await ctx.reply("الرجاء إرسال مبلغ رأس المال الجديد.");
-        } else if (query === 'close_menu') {
-            await ctx.deleteMessage();
-        } else if (query === 'view_open_positions') {
-            await ctx.deleteMessage();
-            const positions = await loadPositions();
-            if (Object.keys(positions).length === 0) return await ctx.reply("✅ لا توجد مراكز مفتوحة حاليًا.");
-            const prices = await getMarketPrices();
-            if (!prices) return await ctx.reply("❌ فشل جلب أسعار السوق.");
-            let msg = "💼 *المراكز المفتوحة حاليًا:*\n━━━━━━━━━━━━━━━━━━\n";
-            for (const asset in positions) {
-                const pos = positions[asset];
-                const currentPrice = prices[`${asset}-USDT`]?.price || 0;
-                const pnl = (currentPrice * pos.totalAmountBought) - pos.totalCost;
-                const pnlPercent = pos.totalCost > 0 ? (pnl / pos.totalCost) * 100 : 0;
-                msg += `*🪙 ${asset}*\n`;
-                msg += `  ▪️ *متوسط الشراء:* \`$${formatNumber(pos.avgBuyPrice, 4)}\`\n`;
-                msg += `  ▪️ *السعر الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n`;
-                msg += `  ▪️ *الربح/الخسارة:* \`${pnl >= 0 ? '+' : ''}${formatNumber(pnl)}\` (\`${pnl >= 0 ? '+' : ''}${formatNumber(pnlPercent)}%\`) ${pnl >= 0 ? '🟢' : '🔴'}\n`;
-                msg += `─────────────────\n`;
-            }
-            await ctx.reply(msg, { parse_mode: "Markdown" });
-        } else if (query === 'manage_alerts') {
-            const alerts = await loadAlerts();
-            if (alerts.length === 0) {
-                await ctx.answerCallbackQuery({ text: 'لا توجد تنبيهات لحذفها.', show_alert: true });
-                return;
-            }
-            const alertKeyboard = new InlineKeyboard();
-            alerts.forEach((alert, index) => {
-                alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
-            });
-            alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
-            await ctx.editMessageText("اختر التنبيه الذي تود حذفه:", { reply_markup: alertKeyboard });
-        } else if (query.startsWith('delete_alert:')) {
-            const indexToDelete = parseInt(query.split(':')[1]);
-            const currentAlerts = await loadAlerts();
-            const deletedAlert = currentAlerts.splice(indexToDelete, 1)[0];
-            await saveAlerts(currentAlerts);
-            await ctx.answerCallbackQuery({ text: `✅ تم حذف تنبيه ${deletedAlert.instId}.` });
-            if (currentAlerts.length === 0) {
-                await ctx.editMessageText("✅ تم حذف جميع التنبيهات.", { reply_markup: new InlineKeyboard().text("🔙 رجوع للإعدادات", "back_to_settings") });
-            } else {
-                 const alertKeyboard = new InlineKeyboard();
-                 currentAlerts.forEach((alert, index) => {
-                    alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
-                 });
-                 alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
-                 await ctx.editMessageText("اختر تنبيهًا آخر لحذفه:", { reply_markup: alertKeyboard });
-            }
-        } else if (query === 'back_to_settings') {
-            const menu = await buildSettingsMenu();
-            await ctx.editMessageText("⚙️ *لوحة التحكم والإعدادات الرئيسية*", { parse_mode: "Markdown", reply_markup: menu });
-        } else if (query === 'delete_all_data') {
-             await getDB().flushdb(); // Deletes all keys from the current database.
-             await ctx.reply("🔥 تم حذف جميع بيانات التداول والتاريخ والإعدادات المحفوظة.");
-             await ctx.deleteMessage();
-        } else if (query.includes('report')) {
-            // Handle publish/ignore report from monitorBalanceChanges
-            const originalMessage = ctx.callbackQuery.message.text;
-            const reportMarker = '<REPORT>';
-            const cleanMessage = originalMessage.split(reportMarker)[0];
-            if (query === 'publish_report') {
-                const reportJson = originalMessage.substring(originalMessage.indexOf(reportMarker) + reportMarker.length, originalMessage.indexOf('</REPORT>'));
-                const publicMessage = JSON.parse(reportJson);
-                await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicMessage, { parse_mode: "Markdown" });
-                await ctx.editMessageText(cleanMessage + "\n\n*✅ تم النشر بنجاح.*", { parse_mode: "Markdown", reply_markup: undefined });
-            } else { // ignore_report
-                await ctx.editMessageText(cleanMessage + "\n\n*👍 تم التجاهل.*", { parse_mode: "Markdown", reply_markup: undefined });
-            }
-        }
-    } catch (e) { console.error("Error in callback_query handler:", e); }
-});
+        switch (query) {
+            case "add_virtual_trade":
+                waitingState = 'add_virtual_trade';
+                await ctx.editMessageText(
+                    "✍️ *لإضافة توصية افتراضية، أرسل التفاصيل في 5 أسطر منفصلة:*\n\n" +
+                    "`BTC-USDT`\n" +
+                    "`65000` (سعر الدخول)\n" +
+                    "`70000` (سعر الهدف)\n" +
+                    "`62000` (وقف الخسارة)\n" +
+                    "`1000` (المبلغ الافتراضي)\n\n" +
+                    "**ملاحظة:** *لا تكتب كلمات مثل 'دخول' أو 'هدف'، فقط الأرقام والرمز.*",
+                    { parse_mode: "Markdown" }
+                );
+                break;
+            case "track_virtual_trades":
+                await ctx.editMessageText("⏳ جاري جلب التوصيات النشطة...");
+                const activeTrades = await getActiveVirtualTrades();
+                if (activeTrades.length === 0) {
+                    await ctx.editMessageText("✅ لا توجد توصيات افتراضية نشطة حاليًا.", { reply_markup: virtualTradeKeyboard });
+                    return;
+                }
+                const pricesVT = await getMarketPrices();
+                if (!pricesVT) {
+                    await ctx.editMessageText("❌ فشل جلب الأسعار، لا يمكن متابعة التوصيات.", { reply_markup: virtualTradeKeyboard });
+                    return;
+                }
+                let reportMsg = "📈 *متابعة حية للتوصيات النشطة:*\n" + "━━━━━━━━━━━━━━━━━━━━\n";
+                for (const trade of activeTrades) {
+                    const currentPrice = pricesVT[trade.instId]?.price;
+                    if (!currentPrice) {
+                        reportMsg += `*${trade.instId}:* \`لا يمكن جلب السعر الحالي.\`\n`;
+                    } else {
+                        const pnl = (currentPrice - trade.entryPrice) * (trade.virtualAmount / trade.entryPrice);
+                        const pnlPercent = (trade.virtualAmount > 0) ? (pnl / trade.virtualAmount) * 100 : 0;
+                        const sign = pnl >= 0 ? '+' : '';
+                        const emoji = pnl >= 0 ? '🟢' : '🔴';
 
+                        reportMsg += `*${trade.instId}* ${emoji}\n` +
+                                   ` ▫️ *الدخول:* \`$${formatNumber(trade.entryPrice, 4)}\`\n` +
+                                   ` ▫️ *الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n` +
+                                   ` ▫️ *ربح/خسارة:* \`${sign}${formatNumber(pnl)}\` (\`${sign}${formatNumber(pnlPercent)}%\`)\n` +
+                                   ` ▫️ *الهدف:* \`$${formatNumber(trade.targetPrice, 4)}\`\n` +
+                                   ` ▫️ *الوقف:* \`$${formatNumber(trade.stopLossPrice, 4)}\`\n`;
+                    }
+                    reportMsg += "━━━━━━━━━━━━━━━━━━━━\n";
+                }
+                await ctx.editMessageText(reportMsg, { parse_mode: "Markdown", reply_markup: virtualTradeKeyboard });
+                break;
+            case "back_to_main":
+                await ctx.editMessageText("🏠 عدت للقائمة الرئيسية.");
+                break;
+            case 'toggle_autopost':
+            case 'toggle_summary':
+            case 'toggle_debug':
+                const settings = await loadSettings();
+                if (query === 'toggle_autopost') settings.autoPostToChannel = !settings.autoPostToChannel;
+                if (query === 'toggle_summary') settings.dailySummary = !settings.dailySummary;
+                if (query === 'toggle_debug') settings.debugMode = !settings.debugMode;
+                await saveSettings(settings);
+                const menu = await buildSettingsMenu();
+                await ctx.editMessageReplyMarkup({ reply_markup: menu });
+                break;
+            case 'set_capital':
+                waitingState = 'capital';
+                await ctx.deleteMessage();
+                await ctx.reply("الرجاء إرسال مبلغ رأس المال الجديد.");
+                break;
+            case 'close_menu':
+                await ctx.deleteMessage();
+                break;
+            case 'view_open_positions':
+                await ctx.deleteMessage();
+                const positions = await loadPositions();
+                if (Object.keys(positions).length === 0) return await ctx.reply("✅ لا توجد مراكز مفتوحة حاليًا.");
+                const prices = await getMarketPrices();
+                if (!prices) return await ctx.reply("❌ فشل جلب أسعار السوق.");
+                let msg = "💼 *المراكز المفتوحة حاليًا:*\n━━━━━━━━━━━━━━━━━━\n";
+                for (const asset in positions) {
+                    const pos = positions[asset];
+                    const currentPrice = prices[`${asset}-USDT`]?.price || 0;
+                    const pnl = (currentPrice * pos.totalAmountBought) - pos.totalCost;
+                    const pnlPercent = pos.totalCost > 0 ? (pnl / pos.totalCost) * 100 : 0;
+                    msg += `*🪙 ${asset}*\n`;
+                    msg += `  ▪️ *متوسط الشراء:* \`$${formatNumber(pos.avgBuyPrice, 4)}\`\n`;
+                    msg += `  ▪️ *السعر الحالي:* \`$${formatNumber(currentPrice, 4)}\`\n`;
+                    msg += `  ▪️ *الربح/الخسارة:* \`${pnl >= 0 ? '+' : ''}${formatNumber(pnl)}\` (\`${pnl >= 0 ? '+' : ''}${formatNumber(pnlPercent)}%\`) ${pnl >= 0 ? '🟢' : '🔴'}\n`;
+                    msg += `─────────────────\n`;
+                }
+                await ctx.reply(msg, { parse_mode: "Markdown" });
+                break;
+            case 'manage_alerts':
+                const alerts = await loadAlerts();
+                if (alerts.length === 0) {
+                    await ctx.answerCallbackQuery({ text: 'لا توجد تنبيهات لحذفها.', show_alert: true });
+                    return;
+                }
+                const alertKeyboard = new InlineKeyboard();
+                alerts.forEach((alert, index) => {
+                    alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
+                });
+                alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
+                await ctx.editMessageText("اختر التنبيه الذي تود حذفه:", { reply_markup: alertKeyboard });
+                break;
+            case 'manage_movement_alerts':
+                const alertSettings = await loadAlertSettings();
+                const movementMenu = new InlineKeyboard()
+                    .text(`🌎 عام: ${alertSettings.global}%`, "set_global_alert")
+                    .text("🎯 خاص بعملة", "set_override_alert").row()
+                    .text("🔙 رجوع للإعدادات", "back_to_settings");
+                await ctx.editMessageText(`*إدارة تنبيهات الحركة 📊*\n\nهذه التنبيهات تعمل عندما يتحرك سعر أصل في محفظتك بنسبة معينة.\n\n- *العام:* يطبق على كل العملات.\n- *الخاص:* يتجاوز الإعداد العام لعملة محددة.`, { parse_mode: "Markdown", reply_markup: movementMenu });
+                break;
+            case 'set_global_alert':
+                waitingState = 'movement_alert_global';
+                await ctx.deleteMessage();
+                await ctx.reply("✍️ أرسل النسبة المئوية الجديدة للتنبيه العام (مثال: 5)");
+                break;
+            case 'set_override_alert':
+                waitingState = 'movement_alert_override';
+                await ctx.deleteMessage();
+                await ctx.reply("✍️ أرسل رمز العملة والنسبة المئوية الخاصة بها (مثال: BTC 10)");
+                break;
+            default:
+                if (query.startsWith('delete_alert:')) {
+                    const indexToDelete = parseInt(query.split(':'));
+                    const currentAlerts = await loadAlerts();
+                    const deletedAlert = currentAlerts.splice(indexToDelete, 1);
+                    await saveAlerts(currentAlerts);
+                    await ctx.answerCallbackQuery({ text: `✅ تم حذف تنبيه ${deletedAlert.instId}.` });
+                    if (currentAlerts.length === 0) {
+                        await ctx.editMessageText("✅ تم حذف جميع التنبيهات.", { reply_markup: new InlineKeyboard().text("🔙 رجوع للإعدادات", "back_to_settings") });
+                    } else {
+                         const alertKeyboard = new InlineKeyboard();
+                         currentAlerts.forEach((alert, index) => {
+                            alertKeyboard.text(`🗑️ ${alert.instId} ${alert.condition} ${alert.price}`, `delete_alert:${index}`).row();
+                         });
+                         alertKeyboard.text("🔙 رجوع للإعدادات", "back_to_settings");
+                         await ctx.editMessageText("اختر تنبيهًا آخر لحذفه:", { reply_markup: alertKeyboard });
+                    }
+                } else if (query === 'back_to_settings') {
+                    const menu = await buildSettingsMenu();
+                    await ctx.editMessageText("⚙️ *لوحة التحكم والإعدادات الرئيسية*", { parse_mode: "Markdown", reply_markup: menu });
+                } else if (query === 'delete_all_data') {
+                     await Promise.all([
+                        saveConfig("capital", { value: 0 }),
+                        saveConfig("positions", {}),
+                        saveConfig("dailyHistory", []),
+                        saveConfig("hourlyHistory", []),
+                        saveConfig("priceAlerts", [])
+                     ]);
+                     await ctx.reply("✅ تم حذف جميع بيانات التداول والتاريخ المحفوظة.");
+                     await ctx.deleteMessage();
+                } else if (query.includes('report')) {
+                    const originalMessage = ctx.callbackQuery.message.text;
+                    const reportMarker = '<REPORT>';
+                    const cleanMessage = originalMessage.split(reportMarker);
+                    if (query === 'publish_report') {
+                        const reportJson = originalMessage.substring(originalMessage.indexOf(reportMarker) + reportMarker.length, originalMessage.indexOf('</REPORT>'));
+                        const publicMessage = JSON.parse(reportJson);
+                        await bot.api.sendMessage(process.env.TARGET_CHANNEL_ID, publicMessage, { parse_mode: "Markdown" });
+                        await ctx.editMessageText(cleanMessage + "\n\n*✅ تم النشر بنجاح.*", { parse_mode: "Markdown", reply_markup: undefined });
+                    } else {
+                        await ctx.editMessageText(cleanMessage + "\n\n*👍 تم التجاهل.*", { parse_mode: "Markdown", reply_markup: undefined });
+                    }
+                }
+                break;
+        }
+    } catch (e) {
+        console.error("Error in callback_query handler:", e);
+    }
+});
 
 // =================================================================
 // SECTION 6: VERCEL SERVER HANDLER
@@ -377,7 +543,7 @@ bot.on("callback_query:data", async (ctx) => {
 const app = express();
 app.use(express.json());
 
-connectDB(); // Initialize DB connection
+connectDB();
 
 const webhookHandler = webhookCallback(bot, "express");
 app.post("/api/bot", webhookHandler);
@@ -401,7 +567,7 @@ app.get("/api/cron", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.status(200).send("OKX Advanced Analytics Bot v120 is alive.");
+    res.status(200).send("OKX Advanced Analytics Bot v122 is alive.");
 });
 
 app.use((err, req, res, next) => {
