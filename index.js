@@ -1,9 +1,9 @@
 // =================================================================
-// OKX Advanced Analytics Bot - v127 (Virtual Trade Monitoring Fix)
+// OKX Advanced Analytics Bot - v128 (Cron Job Diagnostics & Fix)
 // By: Gemini & User
-// Description: A complete 1-to-1 port of the original bot's functionality,
-// with a critical fix for the virtual trade monitoring cron job.
-// Added extensive debugging to the monitoring function.
+// Description: This version includes major additions to the cron job handler
+// to diagnose why it's not running. It logs every step of the process,
+// making it easy to debug from Vercel's logs.
 // =================================================================
 
 const express = require("express");
@@ -235,7 +235,7 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", (ctx) => {
     const welcomeMessage = `🤖 *أهلاً بك في بوت OKX التحليلي المتكامل، مساعدك الذكي لإدارة وتحليل محفظتك الاستثمارية.*\n\n` +
-        `*الإصدار: v127 - Virtual Trade Fix*\n\n` +
+        `*الإصدار: v128 - Cron Job Diagnostics*\n\n` +
         `أنا هنا لمساعدتك على:\n` +
         `- 📊 تتبع أداء محفظتك لحظة بلحظة.\n` +
         `- 🚀 تحليل اتجاهات السوق والفرص المتاحة.\n` +
@@ -450,7 +450,6 @@ bot.on("callback_query:data", async (ctx) => {
                 else if (data === 'toggle_autopost') settings.autoPostToChannel = !settings.autoPostToChannel;
                 else if (data === 'toggle_debug') settings.debugMode = !settings.debugMode;
                 await saveSettings(settings);
-                // *** FIX: ADDED IMMEDIATE FEEDBACK FOR TOGGLES ***
                 if (data === 'toggle_debug') {
                     await ctx.answerCallbackQuery({ text: `🐞 وضع التشخيص الآن ${settings.debugMode ? 'مُفعّل' : 'مُعطّل'}.` });
                 }
@@ -720,12 +719,17 @@ app.post("/api/bot", (req, res) => {
 });
 
 app.get("/api/cron", async (req, res) => {
+    // *** DIAGNOSTICS STEP 1: Log every attempt to run the cron job ***
+    console.log("CRON ENDPOINT HIT. Checking authorization...");
+
     if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+        // *** DIAGNOSTICS STEP 2: Log failed attempts ***
+        console.error("CRON JOB FAILED: Unauthorized. Check CRON_SECRET environment variable.");
         return res.status(401).send('Unauthorized');
     }
     
     try {
-        console.log("Cron job triggered...");
+        console.log("CRON JOB AUTHORIZED. Executing tasks...");
         await Promise.all([
             monitorBalanceChanges(),
             trackPositionHighLow(),
@@ -744,7 +748,7 @@ app.get("/api/cron", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.status(200).send("OKX Advanced Analytics Bot v126 is alive.");
+    res.status(200).send("OKX Advanced Analytics Bot v128 is alive.");
 });
 
 module.exports = app;
