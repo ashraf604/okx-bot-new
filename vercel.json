@@ -8,7 +8,11 @@
   ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/api/bot",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/cron",
       "destination": "/api/index.js"
     }
   ],
